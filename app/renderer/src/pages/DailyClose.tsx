@@ -1,4 +1,3 @@
-// src/pages/DailyClose.tsx
 import { useEffect, useMemo, useState } from 'react';
 import { reportDailyClose } from '../services/reports';
 import { printInvoice } from '../services/sales';
@@ -6,9 +5,11 @@ import { buildDailyCloseHtml } from '../reports/dailyCloseTemplate';
 import { getConfig } from '../services/config';
 
 const money = (n: number): string => {
-  const v = Number(n || 0);
-  const formatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(v);
-  return `$${formatted}`;
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  }).format(Number(n || 0));
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -19,15 +20,20 @@ export const DailyClose = ({ user }: { user: any }) => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
   const [bizName, setBizName] = useState('');
+  const [error, setError] = useState('');
 
   const from = useMemo(() => date, [date]);
-  const to = useMemo(() => date, [date]); // por ahora cierre por día
+  const to = useMemo(() => date, [date]);
 
   const load = async () => {
     setLoading(true);
+    setError('');
     try {
       const res = await reportDailyClose(from, to);
       setData(res);
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo cargar el cierre diario.');
+      setData(null);
     } finally {
       setLoading(false);
     }
@@ -68,57 +74,83 @@ export const DailyClose = ({ user }: { user: any }) => {
       totalsByMethod,
     });
 
-    await printInvoice(html); // abre impresión -> Guardar como PDF si no hay impresora
+    await printInvoice(html);
   };
 
   return (
-    <div className="card">
-      <div className="topbar" style={{ position: 'static', marginBottom: 12 }}>
+    <div className="dashboard">
+      <div className="card dashboard__hero">
         <div>
-          <div className="topbar__title">Cierre diario</div>
-          <div className="topbar__subtitle">Ventas, gastos y neto del día</div>
-        </div>
-
-        <div className="topbar__right">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ opacity: 0.8, fontWeight: 800 }}>Fecha:</span>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
-
-          <button className="btn" onClick={load} disabled={loading}>
-            {loading ? 'Cargando...' : 'Refrescar'}
-          </button>
-
-          <button className="btn" onClick={onExport} disabled={loading}>
-            Exportar PDF
-          </button>
+          <div className="dashboard__eyebrow">Cierre diario</div>
+          <h2 className="dashboard__title">Resumen consolidado del día</h2>
+          <p className="dashboard__text">
+            Consulta ventas, utilidad, gastos y neto del día, y exporta el comprobante en PDF.
+          </p>
         </div>
       </div>
 
-      <div className="grid grid-2">
-        <div className="card">
-          <div style={{ opacity: 0.8, fontWeight: 900 }}>Total ventas</div>
-          <div style={{ fontSize: 28, fontWeight: 1000, marginTop: 8 }}>{money(totalSales)}</div>
+      <div className="card">
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'end',
+            gap: 14,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <div className="dashboard__section-title">Seleccionar fecha</div>
+            <div className="dashboard__cash-value">Genera el cierre detallado por día.</div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ opacity: 0.8, fontWeight: 800 }}>Fecha:</span>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </label>
+
+            <button className="btn btn--ghost" onClick={load} disabled={loading}>
+              {loading ? 'Cargando...' : 'Refrescar'}
+            </button>
+
+            <button className="btn" onClick={onExport} disabled={loading}>
+              Exportar PDF
+            </button>
+          </div>
         </div>
 
-        <div className="card">
-          <div style={{ opacity: 0.8, fontWeight: 900 }}>Utilidad</div>
-          <div style={{ fontSize: 28, fontWeight: 1000, marginTop: 8 }}>{money(profit)}</div>
+        {error ? (
+          <div className="pos__msg" style={{ marginTop: 14 }}>
+            {error}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="grid grid-2 dashboard__stats">
+        <div className="card stat-card">
+          <div className="stat-card__label">Total ventas</div>
+          <div className="stat-card__value">{money(totalSales)}</div>
         </div>
 
-        <div className="card">
-          <div style={{ opacity: 0.8, fontWeight: 900 }}>Gastos</div>
-          <div style={{ fontSize: 28, fontWeight: 1000, marginTop: 8 }}>{money(totalExpenses)}</div>
+        <div className="card stat-card">
+          <div className="stat-card__label">Utilidad</div>
+          <div className="stat-card__value">{money(profit)}</div>
         </div>
 
-        <div className="card">
-          <div style={{ opacity: 0.8, fontWeight: 900 }}>Neto</div>
-          <div style={{ fontSize: 28, fontWeight: 1000, marginTop: 8 }}>{money(net)}</div>
+        <div className="card stat-card">
+          <div className="stat-card__label">Gastos</div>
+          <div className="stat-card__value">{money(totalExpenses)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Neto</div>
+          <div className="stat-card__value">{money(net)}</div>
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <div style={{ fontWeight: 1000, marginBottom: 10 }}>Totales por método</div>
+      <div className="card">
+        <div className="dashboard__section-title">Totales por método de pago</div>
 
         <table>
           <thead>

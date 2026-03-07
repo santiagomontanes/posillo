@@ -21,7 +21,6 @@ const asArray = (v: any): any[] => {
 };
 
 const asObject = (v: any): any => {
-  // Para endpoints que deben devolver "un objeto"
   if (v && typeof v === 'object' && !Array.isArray(v)) {
     if (v.data && typeof v.data === 'object') return v.data;
     if (v.row && typeof v.row === 'object') return v.row;
@@ -29,6 +28,14 @@ const asObject = (v: any): any => {
     return v;
   }
   return {};
+};
+
+const money = (n: number): string => {
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  }).format(Number(n || 0));
 };
 
 export const Dashboard = () => {
@@ -74,7 +81,6 @@ export const Dashboard = () => {
     })();
   }, []);
 
-  // ✅ ultra-seguro por si alguien vuelve a setear mal el estado
   const sales7Arr = useMemo(() => asArray(sales7), [sales7]);
 
   const utility =
@@ -97,39 +103,87 @@ export const Dashboard = () => {
   if (error) return <div className="card">Error: {error}</div>;
 
   return (
-    <div>
-      <div className="grid grid-2">
-        <div className="card">
-          <h3>Ventas hoy</h3>
-          <p>{today.total_sales || 0}</p>
+    <div className="dashboard">
+      <div className="dashboard__hero card">
+        <div>
+          <div className="dashboard__eyebrow">Resumen general</div>
+          <h2 className="dashboard__title">Panel principal del sistema</h2>
+          <p className="dashboard__text">
+            Consulta rápidamente ventas, gastos, utilidad y estado actual de caja.
+          </p>
         </div>
-        <div className="card">
-          <h3>Ventas en efectivo hoy</h3>
-          <p>{today.cash_sales || 0}</p>
+      </div>
+
+      <div className="grid grid-2 dashboard__stats">
+        <div className="card stat-card">
+          <div className="stat-card__label">Ventas hoy</div>
+          <div className="stat-card__value">{money(today.total_sales || 0)}</div>
         </div>
-        <div className="card">
-          <h3>Gastos hoy</h3>
-          <p>{today.total_expenses || 0}</p>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Ventas en efectivo hoy</div>
+          <div className="stat-card__value">{money(today.cash_sales || 0)}</div>
         </div>
-        <div className="card">
-          <h3>Utilidad estimada hoy</h3>
-          <p>{utility}</p>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Gastos hoy</div>
+          <div className="stat-card__value">{money(today.total_expenses || 0)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Utilidad estimada hoy</div>
+          <div className="stat-card__value">{money(utility || 0)}</div>
         </div>
       </div>
 
       {cashStatus && (
-        <div className="card">
-          <h3>Caja abierta (turno actual)</h3>
-          <p>Efectivo esperado actual: {cashStatus.expectedCash}</p>
+        <div className="card dashboard__cash-card">
+          <div className="dashboard__section-title">Caja abierta (turno actual)</div>
+          <div className="dashboard__cash-value">
+            Efectivo esperado actual: <strong>{money(cashStatus.expectedCash || 0)}</strong>
+          </div>
         </div>
       )}
 
-      <div className="card">
-        <h3>Ventas por día (últimos 7 días)</h3>
+      <div className="card dashboard__chart-card">
+        <div className="dashboard__section-title">Ventas por día (últimos 7 días)</div>
         <Bar
           data={{
             labels: chartLabels,
-            datasets: [{ label: 'Ventas', data: chartData }],
+            datasets: [
+              {
+                label: 'Ventas',
+                data: chartData,
+              },
+            ],
+          }}
+          options={{
+            responsive: true,
+            plugins: {
+              legend: {
+                labels: {
+                  color: '#e8eefc',
+                },
+              },
+            },
+            scales: {
+              x: {
+                ticks: {
+                  color: '#a9b6d6',
+                },
+                grid: {
+                  color: 'rgba(255,255,255,.05)',
+                },
+              },
+              y: {
+                ticks: {
+                  color: '#a9b6d6',
+                },
+                grid: {
+                  color: 'rgba(255,255,255,.05)',
+                },
+              },
+            },
           }}
         />
       </div>

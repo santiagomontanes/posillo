@@ -2,18 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { archiveProduct, listProducts, saveProduct, updateProduct } from '../services/products';
 import { Modal } from '../ui/Modal';
 
-// ✅ Producto genérico (cualquier negocio)
 const base = {
   name: '',
   barcode: '',
   category: '',
   unit: '',
-
   purchase_price: 0,
   sale_price: 0,
   stock: 1,
   min_stock: 0,
-
   notes: '',
 };
 
@@ -25,21 +22,26 @@ const FIELDS: Array<{
   placeholder?: string;
   type?: 'text' | 'number';
 }> = [
-  { key: 'name', label: 'Nombre', placeholder: 'nombre del producto' },
-  { key: 'barcode', label: 'Código de barras', placeholder: 'escanea el codigo de barras' },
-  { key: 'category', label: 'Categoría', placeholder: ' (opcional)' },
-  { key: 'unit', label: 'Unidad', placeholder: 'Ej: und, kg, lb, caja (opcional)' },
-
+  { key: 'name', label: 'Nombre', placeholder: 'Nombre del producto' },
+  { key: 'barcode', label: 'Código de barras', placeholder: 'Escanea o escribe el código' },
+  { key: 'category', label: 'Categoría', placeholder: 'Ej: bebidas, tecnología, aseo' },
+  { key: 'unit', label: 'Unidad', placeholder: 'Ej: und, kg, caja, lb' },
   { key: 'purchase_price', label: 'Precio de compra', type: 'number' },
   { key: 'sale_price', label: 'Precio de venta', type: 'number' },
   { key: 'stock', label: 'Stock', type: 'number' },
   { key: 'min_stock', label: 'Stock mínimo', type: 'number' },
-
-  { key: 'notes', label: 'Notas', placeholder: 'Opcional' },
+  { key: 'notes', label: 'Notas', placeholder: 'Observaciones opcionales' },
 ];
 
 const isInvalid = (data: any) =>
   data.stock < 0 || data.min_stock < 0 || data.purchase_price < 0 || data.sale_price < 0;
+
+const money = (n: number): string =>
+  new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  }).format(Number(n || 0));
 
 export const Inventory = ({ role }: { role: string }) => {
   const [items, setItems] = useState<any[]>([]);
@@ -85,20 +87,28 @@ export const Inventory = ({ role }: { role: string }) => {
 
   const validateRequired = (data: any): string | null => {
     if (!String(data?.name ?? '').trim()) return 'El nombre del producto es obligatorio.';
-    // barcode es opcional (hay negocios sin código de barras)
     return null;
   };
 
   return (
-    <div>
-      {/* ======= NUEVO PRODUCTO ======= */}
+    <div className="dashboard">
+      <div className="card dashboard__hero">
+        <div>
+          <div className="dashboard__eyebrow">Inventario</div>
+          <h2 className="dashboard__title">Gestión de productos</h2>
+          <p className="dashboard__text">
+            Administra productos, stock, precios y niveles mínimos de inventario.
+          </p>
+        </div>
+      </div>
+
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Nuevo producto</h3>
+        <div className="dashboard__section-title">Nuevo producto</div>
 
         <div className="grid grid-2">
           {FIELDS.map((f) => (
-            <label key={String(f.key)} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{f.label}</span>
+            <label key={String(f.key)} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--muted)' }}>{f.label}</span>
               <input
                 disabled={busy}
                 type={f.type ?? ((numericKeys as readonly string[]).includes(String(f.key)) ? 'number' : 'text')}
@@ -108,7 +118,9 @@ export const Inventory = ({ role }: { role: string }) => {
               />
             </label>
           ))}
+        </div>
 
+        <div style={{ marginTop: 16 }}>
           <button
             disabled={busy}
             onClick={async () => {
@@ -118,7 +130,6 @@ export const Inventory = ({ role }: { role: string }) => {
 
               setBusy(true);
               try {
-                // 🔎 normaliza strings
                 const payload = {
                   ...form,
                   name: String(form.name || '').trim(),
@@ -143,19 +154,29 @@ export const Inventory = ({ role }: { role: string }) => {
         </div>
       </div>
 
-      {/* ======= LISTA / BUSCAR ======= */}
       <div className="card">
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 10,
+            alignItems: 'center',
+            marginBottom: 16,
+            flexWrap: 'wrap',
+          }}
+        >
           <input
             disabled={busy}
-            placeholder="Buscar por nombre, código de barras o categoría"
+            placeholder="Buscar por nombre, código o categoría"
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            style={{ minWidth: 280, flex: 1 }}
           />
-          <button disabled={busy} onClick={() => void load(q)}>
+          <button disabled={busy} className="btn btn--ghost" onClick={() => void load(q)}>
             Buscar
           </button>
         </div>
+
+        <div className="dashboard__section-title">Listado de productos</div>
 
         <table>
           <thead>
@@ -183,43 +204,46 @@ export const Inventory = ({ role }: { role: string }) => {
                     </div>
                   </td>
                   <td style={{ whiteSpace: 'nowrap' }}>{p.barcode || '—'}</td>
-                  <td>{p.sale_price}</td>
+                  <td>{money(Number(p.sale_price ?? 0))}</td>
                   <td className={low ? 'low-stock' : ''}>
                     {stk}
                     {min > 0 ? <span style={{ opacity: 0.8 }}> / min {min}</span> : null}
                   </td>
                   <td>
-                    <button
-                      disabled={busy}
-                      onClick={() => {
-                        setEditing(p);
-                        setEditForm({ ...base, ...p });
-                      }}
-                    >
-                      Editar
-                    </button>
-
-                    {role === 'ADMIN' && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button
                         disabled={busy}
-                        onClick={async () => {
-                          const prevItems = items;
-                          setItems(prevItems.filter((x: any) => x.id !== p.id));
-                          setBusy(true);
-                          try {
-                            await archiveProduct(p.id);
-                            await load(q);
-                          } catch (e: any) {
-                            setItems(prevItems);
-                            alert(e?.message || 'No se pudo archivar el producto.');
-                          } finally {
-                            setBusy(false);
-                          }
+                        className="btn btn--ghost"
+                        onClick={() => {
+                          setEditing(p);
+                          setEditForm({ ...base, ...p });
                         }}
                       >
-                        Archivar
+                        Editar
                       </button>
-                    )}
+
+                      {role === 'ADMIN' && (
+                        <button
+                          disabled={busy}
+                          onClick={async () => {
+                            const prevItems = items;
+                            setItems(prevItems.filter((x: any) => x.id !== p.id));
+                            setBusy(true);
+                            try {
+                              await archiveProduct(p.id);
+                              await load(q);
+                            } catch (e: any) {
+                              setItems(prevItems);
+                              alert(e?.message || 'No se pudo archivar el producto.');
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                        >
+                          Archivar
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
@@ -236,14 +260,13 @@ export const Inventory = ({ role }: { role: string }) => {
         </table>
       </div>
 
-      {/* ======= MODAL EDITAR ======= */}
       <Modal open={Boolean(editing)} onClose={busy ? undefined : () => setEditing(null)}>
         <h3>Editar producto</h3>
 
         <div className="grid grid-2">
           {FIELDS.map((f) => (
-            <label key={String(f.key)} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{f.label}</span>
+            <label key={String(f.key)} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--muted)' }}>{f.label}</span>
               <input
                 disabled={busy}
                 type={f.type ?? ((numericKeys as readonly string[]).includes(String(f.key)) ? 'number' : 'text')}
@@ -255,7 +278,7 @@ export const Inventory = ({ role }: { role: string }) => {
           ))}
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button
             disabled={busy}
             onClick={async () => {
@@ -292,7 +315,7 @@ export const Inventory = ({ role }: { role: string }) => {
           >
             Guardar cambios
           </button>
-          <button disabled={busy} onClick={() => setEditing(null)}>
+          <button disabled={busy} className="btn btn--ghost" onClick={() => setEditing(null)}>
             Cancelar
           </button>
         </div>

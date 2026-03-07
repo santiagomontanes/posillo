@@ -35,9 +35,20 @@ export const Users = () => {
   }, []);
 
   return (
-    <div>
+    <div className="dashboard">
+      <div className="card dashboard__hero">
+        <div>
+          <div className="dashboard__eyebrow">Usuarios</div>
+          <h2 className="dashboard__title">Gestión de accesos</h2>
+          <p className="dashboard__text">
+            Administra operadores, roles y credenciales del sistema.
+          </p>
+        </div>
+      </div>
+
       <div className="card">
-        <h2>Usuarios</h2>
+        <div className="dashboard__section-title">Listado de usuarios</div>
+
         <table>
           <thead>
             <tr>
@@ -59,67 +70,102 @@ export const Users = () => {
                 <td>Activo</td>
                 <td>{fmtDate(u.created_at)}</td>
                 <td>
-                  <button onClick={() => setResetId(u.id)}>Resetear contraseña</button>
+                  <button className="btn btn--ghost" onClick={() => setResetId(u.id)}>
+                    Resetear contraseña
+                  </button>
                 </td>
               </tr>
             ))}
+
+            {users.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ opacity: 0.8 }}>
+                  No hay usuarios registrados.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
-      <div className="card grid">
-        <h3>Crear usuario</h3>
-        <input placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
-        <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <select value={role} onChange={(e) => setRole(e.target.value as 'ADMIN' | 'SUPERVISOR' | 'SELLER')}>
-          <option value="SELLER">SELLER</option>
-          <option value="SUPERVISOR">SUPERVISOR</option>
-          <option value="ADMIN">ADMIN</option>
-        </select>
-        <input type="password" placeholder="Contraseña" value={password} onChange={(e) => setPassword(e.target.value)} />
-        <input
-          type="password"
-          placeholder="Confirmar contraseña"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-        />
-        <button
-          onClick={async () => {
-            if (!name.trim() || !email.trim() || !password) return alert('Completa todos los campos obligatorios.');
-            if (password !== confirmPassword) return alert('Las contraseñas no coinciden.');
-            try {
-              await createUser({ name: name.trim(), email: email.trim(), password, role });
-              setName('');
-              setEmail('');
-              setRole('SELLER');
-              setPassword('');
-              setConfirmPassword('');
-              await load();
-            } catch (e: any) {
-              alert(e?.message || 'No se pudo crear usuario.');
-            }
-          }}
-        >
-          Crear
-        </button>
+      <div className="card">
+        <div className="dashboard__section-title">Crear usuario</div>
+
+        <div className="grid grid-2">
+          <input placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
+          <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as 'ADMIN' | 'SUPERVISOR' | 'SELLER')}
+          >
+            <option value="SELLER">SELLER</option>
+            <option value="SUPERVISOR">SUPERVISOR</option>
+            <option value="ADMIN">ADMIN</option>
+          </select>
+
+          <input
+            type="password"
+            placeholder="Contraseña"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
+          <input
+            type="password"
+            placeholder="Confirmar contraseña"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <button
+            onClick={async () => {
+              if (!name.trim() || !email.trim() || !password) {
+                return alert('Completa todos los campos obligatorios.');
+              }
+              if (password !== confirmPassword) {
+                return alert('Las contraseñas no coinciden.');
+              }
+              try {
+                await createUser({ name: name.trim(), email: email.trim(), password, role });
+                setName('');
+                setEmail('');
+                setRole('SELLER');
+                setPassword('');
+                setConfirmPassword('');
+                await load();
+              } catch (e: any) {
+                alert(e?.message || 'No se pudo crear usuario.');
+              }
+            }}
+          >
+            Crear usuario
+          </button>
+        </div>
       </div>
 
       {resetId ? (
-        <div className="card grid">
-          <h3>Resetear contraseña</h3>
-          <input
-            type="password"
-            placeholder="Nueva contraseña"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-          />
-          <input
-            type="password"
-            placeholder="Confirmar nueva contraseña"
-            value={confirmNewPassword}
-            onChange={(e) => setConfirmNewPassword(e.target.value)}
-          />
-          <div style={{ display: 'flex', gap: 8 }}>
+        <div className="card">
+          <div className="dashboard__section-title">Resetear contraseña</div>
+
+          <div className="grid grid-2">
+            <input
+              type="password"
+              placeholder="Nueva contraseña"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+            <input
+              type="password"
+              placeholder="Confirmar nueva contraseña"
+              value={confirmNewPassword}
+              onChange={(e) => setConfirmNewPassword(e.target.value)}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
             <button
               onClick={async () => {
                 if (!newPassword) return alert('Ingresa la nueva contraseña.');
@@ -136,7 +182,9 @@ export const Users = () => {
             >
               Guardar nueva contraseña
             </button>
+
             <button
+              className="btn btn--ghost"
               onClick={() => {
                 setResetId('');
                 setNewPassword('');

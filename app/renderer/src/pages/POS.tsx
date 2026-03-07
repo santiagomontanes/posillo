@@ -18,15 +18,14 @@ type CartItem = {
 };
 
 const money = (n: number): string => {
-  const v = Number(n || 0);
-  const formatted = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(v);
-  return `$${formatted}`;
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  }).format(Number(n || 0));
 };
 
 export const POS = ({ user }: { user: any }) => {
-  // =========================
-  // Scanner (pistola)
-  // =========================
   const scanRef = useRef<HTMLInputElement | null>(null);
   const [scanValue, setScanValue] = useState('');
   const scanTimer = useRef<number | null>(null);
@@ -35,9 +34,6 @@ export const POS = ({ user }: { user: any }) => {
     setTimeout(() => scanRef.current?.focus(), 0);
   };
 
-  // =========================
-  // States
-  // =========================
   const [q, setQ] = useState('');
   const [products, setProducts] = useState<any[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -59,23 +55,14 @@ export const POS = ({ user }: { user: any }) => {
 
   const [biz, setBiz] = useState<{ name?: string; logoDataUrl?: string }>({});
 
-  // =========================
-  // Focus scanner al cargar
-  // =========================
   useEffect(() => {
     focusScanner();
   }, []);
 
-  // =========================
-  // Cargar productos POS
-  // =========================
   useEffect(() => {
     void listPosProducts(q).then(setProducts);
   }, [q]);
 
-  // =========================
-  // Config negocio (logo/nombre)
-  // =========================
   useEffect(() => {
     (async () => {
       try {
@@ -87,18 +74,12 @@ export const POS = ({ user }: { user: any }) => {
     })();
   }, []);
 
-  // =========================
-  // NO robar foco si estás escribiendo
-  // =========================
   const onRootClick = (e: React.MouseEvent) => {
     const el = e.target as HTMLElement;
     if (el.closest('input, textarea, select, button')) return;
     focusScanner();
   };
 
-  // =========================
-  // Helpers
-  // =========================
   const subtotal = useMemo(() => cart.reduce((a, c) => a + c.line_total, 0), [cart]);
   const total = Math.max(0, subtotal - discount);
 
@@ -178,9 +159,6 @@ export const POS = ({ user }: { user: any }) => {
     });
   };
 
-  // =========================
-  // Scanner auto (sin Enter)
-  // =========================
   useEffect(() => {
     if (scanTimer.current) window.clearTimeout(scanTimer.current);
 
@@ -210,10 +188,8 @@ export const POS = ({ user }: { user: any }) => {
     return () => {
       if (scanTimer.current) window.clearTimeout(scanTimer.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanValue]);
 
-  // Scanner con Enter (si el lector lo manda)
   const onScanKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
 
@@ -237,9 +213,6 @@ export const POS = ({ user }: { user: any }) => {
     }
   };
 
-  // =========================
-  // Ítem libre
-  // =========================
   const addFreeItem = (): void => {
     const description = freeDescription.trim();
     if (!description) return setMessage('La descripción del ítem libre es obligatoria.');
@@ -273,9 +246,6 @@ export const POS = ({ user }: { user: any }) => {
     focusScanner();
   };
 
-  // =========================
-  // Carrito
-  // =========================
   const removeItem = (cartId: string): void => {
     setCart((current) => current.filter((i) => i.cart_id !== cartId));
   };
@@ -288,9 +258,6 @@ export const POS = ({ user }: { user: any }) => {
     focusScanner();
   };
 
-  // =========================
-  // Confirmar venta
-  // =========================
   const confirm = async (): Promise<void> => {
     if (isProcessing) return;
     if (cart.length === 0) return setMessage('El carrito está vacío.');
@@ -352,6 +319,8 @@ export const POS = ({ user }: { user: any }) => {
       await printInvoice(html);
 
       clearCart();
+      setCustomerName('');
+      setCustomerId('');
       setMessage(`Venta realizada. Factura #${String(res.invoiceNumber ?? '')}`);
     } catch (e: any) {
       setMessage(e?.message || 'No se pudo confirmar la venta.');
@@ -361,14 +330,10 @@ export const POS = ({ user }: { user: any }) => {
     }
   };
 
-  // =========================
-  // Métodos de pago
-  // =========================
   const paymentOptions = ['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'BANCOLOMBIA', 'TARJETA', 'ADDI', 'OTRO'];
 
   return (
-    <div className="pos" onClick={onRootClick}>
-      {/* Input invisible para escáner */}
+    <div className="dashboard" onClick={onRootClick}>
       <input
         ref={scanRef}
         value={scanValue}
@@ -383,224 +348,253 @@ export const POS = ({ user }: { user: any }) => {
         }}
       />
 
-      {/* IZQUIERDA */}
-      <section className="pos__left card">
-        <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
-          {biz?.logoDataUrl ? (
-            <img
-              src={biz.logoDataUrl}
-              alt="logo"
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 14,
-                objectFit: 'contain',
-                background: 'rgba(255,255,255,.06)',
-                padding: 6,
+      <div className="card dashboard__hero">
+        <div>
+          <div className="dashboard__eyebrow">Punto de venta</div>
+          <h2 className="dashboard__title">Cobro rápido y control del carrito</h2>
+          <p className="dashboard__text">
+            Busca productos, escanea códigos, agrega ítems libres y finaliza ventas con distintos métodos de pago.
+          </p>
+        </div>
+      </div>
+
+      <div className="pos">
+        <section className="pos__left card">
+          <div
+            className="card"
+            style={{
+              marginBottom: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            {biz?.logoDataUrl ? (
+              <img
+                src={biz.logoDataUrl}
+                alt="logo"
+                style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 14,
+                  objectFit: 'contain',
+                  background: 'rgba(255,255,255,.06)',
+                  padding: 6,
+                }}
+              />
+            ) : (
+              <div className="sidebar__logo">S</div>
+            )}
+
+            <div>
+              <div style={{ fontWeight: 1000, fontSize: 18 }}>
+                Bienvenido{biz?.name ? ` a ${biz.name}` : ''}
+              </div>
+              <div className="sidebar__subtitle">Powered by Sistetecni POS</div>
+            </div>
+          </div>
+
+          <div className="pos__search">
+            <input
+              placeholder="Buscar o escanear código"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={async (e) => {
+                if (e.key !== 'Enter') return;
+
+                const code = q.trim();
+                if (!code) return;
+
+                try {
+                  const p = await getProductByBarcode(code);
+
+                  if (!p) {
+                    setMessage(`No existe producto con código: ${code}`);
+                    return;
+                  }
+
+                  addFromProduct(p);
+                  setQ('');
+                  setMessage('');
+                } catch (err: any) {
+                  setMessage(err?.message || 'Error leyendo código de barras.');
+                }
               }}
             />
-          ) : (
-            <div className="sidebar__logo">S</div>
-          )}
 
-          <div>
-            <div style={{ fontWeight: 1000, fontSize: 18 }}>
-              Bienvenido{biz?.name ? ` a ${biz.name}` : ''}
-            </div>
-            <div className="sidebar__subtitle">Powered by Sistetecni POS</div>
-          </div>
-        </div>
-
-        {/* Buscar o escanear en el input visible */}
-        <div className="pos__search">
-          <input
-            placeholder="Buscar o escanear código"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={async (e) => {
-              if (e.key !== 'Enter') return;
-
-              const code = q.trim();
-              if (!code) return;
-
-              try {
-                const p = await getProductByBarcode(code);
-
-                if (!p) {
-                  setMessage(`No existe producto con código: ${code}`);
-                  return;
-                }
-
-                addFromProduct(p);
-                setQ('');
-                setMessage('');
-              } catch (err: any) {
-                setMessage(err?.message || 'Error leyendo código de barras.');
-              }
-            }}
-          />
-
-          <button className="btn" onClick={() => setFreeOpen(true)}>
-            Ítem libre
-          </button>
-        </div>
-
-        <div className="pos__products">
-          {products.map((p: any) => (
-            <button
-              key={p.id}
-              className="pos__product"
-              onClick={() => addFromProduct(p)}
-              disabled={isProcessing || (p.stock ?? 0) <= 0}
-              title={(p.stock ?? 0) <= 0 ? 'Sin stock' : 'Agregar'}
-            >
-              <div className="pos__product-title">{displayName(p)}</div>
-              <div className="pos__product-sub">
-                <span>{String(p?.sku ?? p?.barcode ?? p?.cpu ?? '').trim() || '—'}</span>
-                <span>Stock: {p.stock}</span>
-              </div>
-              <div className="pos__product-price">{money(Number(p.sale_price ?? 0))}</div>
-            </button>
-          ))}
-
-          {products.length === 0 && (
-            <div style={{ opacity: 0.85, padding: 10 }}>No hay productos para mostrar.</div>
-          )}
-        </div>
-      </section>
-
-      {/* DERECHA */}
-      <section className="pos__right card">
-        <div className="pos__right-header">
-          <h3 style={{ margin: 0 }}>Carrito</h3>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn btn--ghost" onClick={clearCart} disabled={isProcessing}>
-              Vaciar
-            </button>
-            <button className="btn btn--ghost" onClick={clearCart} disabled={isProcessing}>
-              Cancelar
+            <button className="btn" onClick={() => setFreeOpen(true)}>
+              Ítem libre
             </button>
           </div>
-        </div>
 
-        <div className="pos__cart">
-          {cart.map((i) => (
-            <div key={i.cart_id} className="pos__cart-row">
-              <div className="pos__cart-info">
-                <div className="pos__cart-name">{i.name}</div>
-                <div className="pos__cart-meta">
-                  <span>{money(i.unit_price)} c/u</span>
-                  {i.stock != null && <span>Disp: {i.stock}</span>}
+          <div className="pos__products">
+            {products.map((p: any) => (
+              <button
+                key={p.id}
+                className="pos__product"
+                onClick={() => addFromProduct(p)}
+                disabled={isProcessing || (p.stock ?? 0) <= 0}
+                title={(p.stock ?? 0) <= 0 ? 'Sin stock' : 'Agregar'}
+              >
+                <div className="pos__product-title">{displayName(p)}</div>
+                <div className="pos__product-sub">
+                  <span>{String(p?.sku ?? p?.barcode ?? p?.cpu ?? '').trim() || '—'}</span>
+                  <span>Stock: {p.stock}</span>
                 </div>
-              </div>
+                <div className="pos__product-price">{money(Number(p.sale_price ?? 0))}</div>
+              </button>
+            ))}
 
-              <div className="pos__qty">
-                <button className="qtybtn" onClick={() => setQty(i.cart_id, i.qty - 1)} disabled={isProcessing}>
-                  −
-                </button>
-                <input
-                  className="qtyinput"
-                  type="number"
-                  min={1}
-                  max={i.stock ?? undefined}
-                  value={i.qty}
-                  disabled={isProcessing}
-                  onChange={(e) => setQty(i.cart_id, Number(e.target.value || 1))}
-                />
-                <button className="qtybtn" onClick={() => setQty(i.cart_id, i.qty + 1)} disabled={isProcessing}>
-                  +
-                </button>
-              </div>
+            {products.length === 0 && (
+              <div style={{ opacity: 0.85, padding: 10 }}>No hay productos para mostrar.</div>
+            )}
+          </div>
+        </section>
 
-              <div className="pos__line-total">{money(i.line_total)}</div>
-
-              <button className="btn btn--ghost" onClick={() => removeItem(i.cart_id)} disabled={isProcessing}>
-                Eliminar
+        <section className="pos__right card">
+          <div className="pos__right-header">
+            <h3 style={{ margin: 0 }}>Carrito</h3>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn--ghost" onClick={clearCart} disabled={isProcessing}>
+                Vaciar
+              </button>
+              <button className="btn btn--ghost" onClick={clearCart} disabled={isProcessing}>
+                Cancelar
               </button>
             </div>
-          ))}
-
-          {cart.length === 0 && <div className="pos__empty">Agrega productos para iniciar una venta.</div>}
-        </div>
-
-        <div className="pos__pay card" style={{ marginTop: 12 }}>
-          <div className="pos__pay-row">
-            <span>Subtotal</span>
-            <b>{money(subtotal)}</b>
           </div>
 
-          <div className="pos__pay-row" style={{ alignItems: 'center', gap: 10 }}>
-            <span>Descuento</span>
+          <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
             <input
-              style={{ width: 160 }}
-              type="number"
-              min={0}
-              value={discount}
-              disabled={isProcessing}
-              onChange={(e) => setDiscount(Math.max(0, Number(e.target.value || 0)))}
-              placeholder="0"
+              placeholder="Nombre del cliente (opcional)"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+            />
+            <input
+              placeholder="Documento o identificación (opcional)"
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
             />
           </div>
 
-          <div className="pos__pay-method">
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>Método de pago</div>
-            <div className="pos__chips">
-              {paymentOptions.map((opt) => (
-                <button
-                  key={opt}
-                  className={`chip ${paymentMethod === opt ? 'chip--active' : ''}`}
-                  onClick={() => setPayment(opt)}
-                  disabled={isProcessing}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {paymentMethod === 'EFECTIVO' && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 800, marginBottom: 8 }}>Pago en efectivo</div>
-
-              <div className="pos__pay-row" style={{ alignItems: 'center', gap: 10 }}>
-                <span>Efectivo recibido</span>
-                <input
-                  style={{ width: 160 }}
-                  inputMode="numeric"
-                  value={cashReceivedStr}
-                  disabled={isProcessing}
-                  onChange={(e) => setCashReceivedStr(e.target.value)}
-                  placeholder="Ej: 20000"
-                />
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <div style={{ opacity: 0.85 }}>CAMBIO A DEVOLVER:</div>
-                <div style={{ fontSize: 26, fontWeight: 900 }}>{money(change)}</div>
-              </div>
-
-              {missing > 0 && (
-                <div className="pos__msg" style={{ marginTop: 8 }}>
-                  Falta: <b>{money(missing)}</b>
+          <div className="pos__cart">
+            {cart.map((i) => (
+              <div key={i.cart_id} className="pos__cart-row">
+                <div className="pos__cart-info">
+                  <div className="pos__cart-name">{i.name}</div>
+                  <div className="pos__cart-meta">
+                    <span>{money(i.unit_price)} c/u</span>
+                    {i.stock != null && <span>Disp: {i.stock}</span>}
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
 
-          {message && <div className="pos__msg">{message}</div>}
+                <div className="pos__qty">
+                  <button className="qtybtn" onClick={() => setQty(i.cart_id, i.qty - 1)} disabled={isProcessing}>
+                    −
+                  </button>
+                  <input
+                    className="qtyinput"
+                    type="number"
+                    min={1}
+                    max={i.stock ?? undefined}
+                    value={i.qty}
+                    disabled={isProcessing}
+                    onChange={(e) => setQty(i.cart_id, Number(e.target.value || 1))}
+                  />
+                  <button className="qtybtn" onClick={() => setQty(i.cart_id, i.qty + 1)} disabled={isProcessing}>
+                    +
+                  </button>
+                </div>
 
-          <div className="pos__total">
-            <div>Total</div>
-            <div className="pos__total-amount">{money(total)}</div>
+                <div className="pos__line-total">{money(i.line_total)}</div>
+
+                <button className="btn btn--ghost" onClick={() => removeItem(i.cart_id)} disabled={isProcessing}>
+                  Eliminar
+                </button>
+              </div>
+            ))}
+
+            {cart.length === 0 && <div className="pos__empty">Agrega productos para iniciar una venta.</div>}
           </div>
 
-          <button className="pos__confirm" onClick={confirm} disabled={!canConfirm}>
-            {isProcessing ? 'Procesando...' : 'Cobrar'}
-          </button>
-        </div>
-      </section>
+          <div className="pos__pay card" style={{ marginTop: 12 }}>
+            <div className="pos__pay-row">
+              <span>Subtotal</span>
+              <b>{money(subtotal)}</b>
+            </div>
 
-      {/* MODAL ITEM LIBRE */}
+            <div className="pos__pay-row" style={{ alignItems: 'center', gap: 10 }}>
+              <span>Descuento</span>
+              <input
+                style={{ width: 160 }}
+                type="number"
+                min={0}
+                value={discount}
+                disabled={isProcessing}
+                onChange={(e) => setDiscount(Math.max(0, Number(e.target.value || 0)))}
+                placeholder="0"
+              />
+            </div>
+
+            <div className="pos__pay-method">
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>Método de pago</div>
+              <div className="pos__chips">
+                {paymentOptions.map((opt) => (
+                  <button
+                    key={opt}
+                    className={`chip ${paymentMethod === opt ? 'chip--active' : ''}`}
+                    onClick={() => setPayment(opt)}
+                    disabled={isProcessing}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {paymentMethod === 'EFECTIVO' && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Pago en efectivo</div>
+
+                <div className="pos__pay-row" style={{ alignItems: 'center', gap: 10 }}>
+                  <span>Efectivo recibido</span>
+                  <input
+                    style={{ width: 180 }}
+                    inputMode="numeric"
+                    value={cashReceivedStr}
+                    disabled={isProcessing}
+                    onChange={(e) => setCashReceivedStr(e.target.value)}
+                    placeholder="Ej: 20000"
+                  />
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ opacity: 0.85 }}>Cambio a devolver</div>
+                  <div style={{ fontSize: 26, fontWeight: 900 }}>{money(change)}</div>
+                </div>
+
+                {missing > 0 && (
+                  <div className="pos__msg" style={{ marginTop: 8 }}>
+                    Falta: <b>{money(missing)}</b>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {message && <div className="pos__msg">{message}</div>}
+
+            <div className="pos__total">
+              <div>Total</div>
+              <div className="pos__total-amount">{money(total)}</div>
+            </div>
+
+            <button className="pos__confirm" onClick={confirm} disabled={!canConfirm}>
+              {isProcessing ? 'Procesando...' : 'Cobrar'}
+            </button>
+          </div>
+        </section>
+      </div>
+
       <Modal open={freeOpen} onClose={isProcessing ? undefined : () => setFreeOpen(false)}>
         <h3>Agregar ítem libre</h3>
 

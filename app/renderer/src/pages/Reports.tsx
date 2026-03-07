@@ -5,7 +5,6 @@ import { salesByDay, summary, topProducts } from '../services/reports';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement);
 
-// ✅ Convierte respuesta a array aunque venga envuelta: {rows:[]}, {data:[]}, etc.
 const asArray = (v: any): any[] => {
   if (Array.isArray(v)) return v;
   if (Array.isArray(v?.rows)) return v.rows;
@@ -15,7 +14,6 @@ const asArray = (v: any): any[] => {
   return [];
 };
 
-// ✅ Convierte respuesta a objeto aunque venga envuelta: {data:{...}}, etc.
 const asObject = (v: any): any => {
   if (v && typeof v === 'object' && !Array.isArray(v)) {
     if (v.data && typeof v.data === 'object') return v.data;
@@ -26,13 +24,24 @@ const asObject = (v: any): any => {
   return {};
 };
 
-// ✅ YYYY-MM-DD (mejor para BETWEEN)
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+
+const money = (n: number): string =>
+  new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  }).format(Number(n || 0));
 
 export const Reports = () => {
   const [data, setData] = useState<any[]>([]);
   const [top, setTop] = useState<any[]>([]);
-  const [sum, setSum] = useState<any>({ total_sales: 0, total_costs: 0, total_expenses: 0, utility: 0 });
+  const [sum, setSum] = useState<any>({
+    total_sales: 0,
+    total_costs: 0,
+    total_expenses: 0,
+    utility: 0,
+  });
   const [error, setError] = useState('');
 
   const from = useMemo(() => isoDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)), []);
@@ -85,34 +94,95 @@ export const Reports = () => {
   );
 
   return (
-    <div>
+    <div className="dashboard">
+      <div className="card dashboard__hero">
+        <div>
+          <div className="dashboard__eyebrow">Reportes</div>
+          <h2 className="dashboard__title">Análisis de ventas y rendimiento</h2>
+          <p className="dashboard__text">
+            Consulta el comportamiento comercial del negocio y detecta tendencias de ventas.
+          </p>
+        </div>
+      </div>
+
       {error && <div className="card">Error: {error}</div>}
 
-      <div className="card">
-        <h3>Ventas por día</h3>
+      <div className="grid grid-2 dashboard__stats">
+        <div className="card stat-card">
+          <div className="stat-card__label">Ventas del período</div>
+          <div className="stat-card__value">{money(sum.total_sales ?? 0)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Gastos del período</div>
+          <div className="stat-card__value">{money(sum.total_expenses ?? 0)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Costos del período</div>
+          <div className="stat-card__value">{money(sum.total_costs ?? 0)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Utilidad estimada</div>
+          <div className="stat-card__value">{money(sum.utility ?? 0)}</div>
+        </div>
+      </div>
+
+      <div className="card dashboard__chart-card">
+        <div className="dashboard__section-title">Ventas por día</div>
         <Bar
           data={{
             labels,
             datasets: [{ label: 'Ventas', data: totals }],
           }}
+          options={{
+            responsive: true,
+            plugins: {
+              legend: {
+                labels: {
+                  color: '#e8eefc',
+                },
+              },
+            },
+            scales: {
+              x: {
+                ticks: { color: '#a9b6d6' },
+                grid: { color: 'rgba(255,255,255,.05)' },
+              },
+              y: {
+                ticks: { color: '#a9b6d6' },
+                grid: { color: 'rgba(255,255,255,.05)' },
+              },
+            },
+          }}
         />
       </div>
 
       <div className="card">
-        <h3>Top productos</h3>
-        {asArray(top).length === 0 && <div style={{ opacity: 0.8 }}>Sin datos.</div>}
-        {asArray(top).map((t: any, i: number) => (
-          <div key={String(t?.name ?? i)}>
-            {String(t?.name ?? '')}: {Number(t?.qty ?? 0)}
-          </div>
-        ))}
-      </div>
+        <div className="dashboard__section-title">Top productos</div>
 
-      <div className="card">
-        <h3>Resumen</h3>
-        <p>Ventas: {sum.total_sales ?? 0}</p>
-        <p>Gastos: {sum.total_expenses ?? 0}</p>
-        <p>Utilidad estimada: {sum.utility ?? 0}</p>
+        {asArray(top).length === 0 && <div style={{ opacity: 0.8 }}>Sin datos.</div>}
+
+        <div style={{ display: 'grid', gap: 10 }}>
+          {asArray(top).map((t: any, i: number) => (
+            <div
+              key={String(t?.name ?? i)}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '12px 14px',
+                borderRadius: 14,
+                background: 'rgba(255,255,255,.03)',
+                border: '1px solid rgba(255,255,255,.06)',
+              }}
+            >
+              <span style={{ fontWeight: 700 }}>{String(t?.name ?? '')}</span>
+              <span style={{ color: 'var(--muted)' }}>{Number(t?.qty ?? 0)} vendidos</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
