@@ -76,7 +76,6 @@ export const getCashStatusMySql = async (): Promise<any> => {
   const open = await getOpenCashMySql();
   if (!open) return null;
 
-  // ✅ usar el valor local de MySQL, sin convertirlo a UTC
   const openedAt = normalizeDbDateTime(open.opened_at);
   const now = mysqlLocalDateTime();
 
@@ -97,11 +96,23 @@ export const getCashStatusMySql = async (): Promise<any> => {
     [openedAt, now],
   );
 
+  // ✅ devoluciones en efectivo del turno
+  const returnsRows = await mysqlQuery<any>(
+    `SELECT COALESCE(SUM(sr.total_returned),0) as total
+     FROM sale_returns sr
+     JOIN sales s ON s.id = sr.sale_id
+     WHERE sr.created_at BETWEEN ? AND ?
+       AND UPPER(TRIM(s.payment_method)) = ?`,
+    [openedAt, now, 'EFECTIVO'],
+  );
+
   const cashSales = Number(cashSalesRows?.[0]?.total ?? 0);
   const expenses = Number(expensesRows?.[0]?.total ?? 0);
+  const cashReturns = Number(returnsRows?.[0]?.total ?? 0);
   const openingCash = Number(open.opening_cash ?? 0);
 
-  const expectedCash = openingCash + cashSales - expenses;
+  // ✅ efectivo real esperado
+  const expectedCash = openingCash + cashSales - expenses - cashReturns;
 
   return {
     id: open.id,
@@ -109,6 +120,7 @@ export const getCashStatusMySql = async (): Promise<any> => {
     openingCash,
     cashSales,
     expenses,
+    cashReturns,
     expectedCash,
   };
 };
@@ -127,7 +139,6 @@ export const closeCashMySql = async (data: {
   const cash = rows?.[0];
   if (!cash) throw new Error('Caja no encontrada.');
 
-  // ✅ igual: usar DATETIME local
   const openedAt = normalizeDbDateTime(cash.opened_at);
   const closedAt = mysqlLocalDateTime();
 
@@ -147,12 +158,22 @@ export const closeCashMySql = async (data: {
     [openedAt, closedAt],
   );
 
+  const returnsRows = await mysqlQuery<any>(
+    `SELECT COALESCE(SUM(sr.total_returned),0) as total
+     FROM sale_returns sr
+     JOIN sales s ON s.id = sr.sale_id
+     WHERE sr.created_at BETWEEN ? AND ?
+       AND UPPER(TRIM(s.payment_method)) = ?`,
+    [openedAt, closedAt, 'EFECTIVO'],
+  );
+
   const totalSales = Number(salesRows?.[0]?.total ?? 0);
   const cashSales = Number(salesRows?.[0]?.cashSales ?? 0);
   const totalExpenses = Number(expensesRows?.[0]?.total ?? 0);
+  const cashReturns = Number(returnsRows?.[0]?.total ?? 0);
 
   const openingCash = Number(cash.opening_cash ?? 0);
-  const expectedCash = openingCash + cashSales - totalExpenses;
+  const expectedCash = openingCash + cashSales - totalExpenses - cashReturns;
   const diff = Number(data.countedCash ?? 0) - expectedCash;
 
   await mysqlExec(
@@ -183,6 +204,7 @@ export const closeCashMySql = async (data: {
     totalSales,
     cashSales,
     totalExpenses,
+    cashReturns,
     diff,
   };
 };

@@ -37,10 +37,38 @@ contextBridge.exposeInMainWorld('api', {
     archive: (payload: unknown) => ipcRenderer.invoke('products:archive', payload),
   },
 
-  sales: {
-    create: (payload: unknown) => ipcRenderer.invoke('sales:create', payload),
-    printInvoice: (payload: unknown) => ipcRenderer.invoke('sales:print-invoice', payload),
-  },
+sales: {
+  create: (payload: unknown) =>
+    ipcRenderer.invoke('sales:create', payload),
+
+  /* suspender venta */
+  suspend: (payload: unknown) =>
+    ipcRenderer.invoke('sales:suspend', payload),
+
+  /* ventas suspendidas */
+  listSuspended: (payload: unknown) =>
+    ipcRenderer.invoke('sales:suspended-list', payload),
+
+  getSuspended: (payload: unknown) =>
+    ipcRenderer.invoke('sales:suspended-get', payload),
+
+  deleteSuspended: (payload: unknown) =>
+    ipcRenderer.invoke('sales:suspended-delete', payload),
+
+  /* historial */
+  listRecent: (payload: unknown) =>
+    ipcRenderer.invoke('sales:recent', payload),
+
+  /* detalle venta */
+  getDetail: (payload: unknown) =>
+    ipcRenderer.invoke('sales:detail', payload),
+
+  return: (payload: unknown) => ipcRenderer.invoke('sales:return', payload),
+
+  /* imprimir */
+  printInvoice: (payload: unknown) =>
+    ipcRenderer.invoke('sales:print-invoice', payload),
+},
 
   expenses: {
     add: (payload: unknown) => ipcRenderer.invoke('expenses:add', payload),

@@ -47,44 +47,60 @@ export const Dashboard = () => {
     cash_sales: 0,
     total_expenses: 0,
     total_costs: 0,
+    total_returns: 0,
+    net_sales: 0,
   });
 
   const [cashStatus, setCashStatus] = useState<any>(null);
   const [sales7, setSales7] = useState<any[]>([]);
 
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [tRaw, s7Raw, cash] = await Promise.all([
+        todaySummary(),
+        last7DaysSales(),
+        ipc.cash.getStatus(getAuthContext()),
+      ]);
+
+      const t = asObject(tRaw);
+
+      const totalSales = Number(t.total_sales ?? t.total ?? 0);
+      const cashSales = Number(t.cash_sales ?? t.cash ?? 0);
+      const totalExpenses = Number(t.total_expenses ?? t.expenses ?? 0);
+      const totalCosts = Number(t.total_costs ?? t.costs ?? 0);
+      const totalReturns = Number(t.total_returns ?? t.returns ?? 0);
+      const netSales = Number(t.net_sales ?? (totalSales - totalReturns));
+
+      setToday({
+        total_sales: totalSales,
+        cash_sales: cashSales,
+        total_expenses: totalExpenses,
+        total_costs: totalCosts,
+        total_returns: totalReturns,
+        net_sales: netSales,
+      });
+
+      setSales7(asArray(s7Raw));
+      setCashStatus(cash);
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo cargar el dashboard');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const [tRaw, s7Raw, cash] = await Promise.all([
-          todaySummary(),
-          last7DaysSales(),
-          ipc.cash.getStatus(getAuthContext()),
-        ]);
-
-        const t = asObject(tRaw);
-        setToday({
-          total_sales: Number(t.total_sales ?? t.total ?? 0),
-          cash_sales: Number(t.cash_sales ?? t.cash ?? 0),
-          total_expenses: Number(t.total_expenses ?? t.expenses ?? 0),
-          total_costs: Number(t.total_costs ?? t.costs ?? 0),
-        });
-
-        setSales7(asArray(s7Raw));
-        setCashStatus(cash);
-      } catch (e: any) {
-        setError(e?.message || 'No se pudo cargar el dashboard');
-      } finally {
-        setLoading(false);
-      }
-    })();
+    void load();
+    const timer = setInterval(() => void load(), 10000);
+    return () => clearInterval(timer);
   }, []);
 
   const sales7Arr = useMemo(() => asArray(sales7), [sales7]);
 
   const utility =
-    (today.total_sales || 0) - (today.total_costs || 0) - (today.total_expenses || 0);
+    (today.net_sales || 0) - (today.total_costs || 0) - (today.total_expenses || 0);
 
   const chartLabels = useMemo(
     () =>
@@ -109,15 +125,25 @@ export const Dashboard = () => {
           <div className="dashboard__eyebrow">Resumen general</div>
           <h2 className="dashboard__title">Panel principal del sistema</h2>
           <p className="dashboard__text">
-            Consulta rápidamente ventas, gastos, utilidad y estado actual de caja.
+            Consulta rápidamente ventas, devoluciones, gastos, utilidad y estado actual de caja.
           </p>
         </div>
       </div>
 
       <div className="grid grid-2 dashboard__stats">
         <div className="card stat-card">
-          <div className="stat-card__label">Ventas hoy</div>
+          <div className="stat-card__label">Ventas brutas hoy</div>
           <div className="stat-card__value">{money(today.total_sales || 0)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Devoluciones hoy</div>
+          <div className="stat-card__value">{money(today.total_returns || 0)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Ventas netas hoy</div>
+          <div className="stat-card__value">{money(today.net_sales || 0)}</div>
         </div>
 
         <div className="card stat-card">
@@ -139,8 +165,21 @@ export const Dashboard = () => {
       {cashStatus && (
         <div className="card dashboard__cash-card">
           <div className="dashboard__section-title">Caja abierta (turno actual)</div>
+
           <div className="dashboard__cash-value">
-            Efectivo esperado actual: <strong>{money(cashStatus.expectedCash || 0)}</strong>
+            Efectivo esperado actual: <strong>{money(Number(cashStatus.expectedCash ?? 0))}</strong>
+          </div>
+
+          <div className="dashboard__cash-value">
+            Ventas efectivo turno: <strong>{money(Number(cashStatus.cashSales ?? 0))}</strong>
+          </div>
+
+          <div className="dashboard__cash-value">
+            Gastos turno: <strong>{money(Number(cashStatus.expenses ?? 0))}</strong>
+          </div>
+
+          <div className="dashboard__cash-value">
+            Devoluciones efectivo turno: <strong>{money(Number(cashStatus.cashReturns ?? 0))}</strong>
           </div>
         </div>
       )}

@@ -1,13 +1,9 @@
-// app/electron/db/mysql/initSchema.mysql.ts
 import { readMySqlConfig } from '../mysqlConfig';
 import { mysqlExec, mysqlQueryOne } from '../mysql';
 
 import bcrypt from 'bcryptjs';
 import { v4 as uuid } from 'uuid';
 
-// --------------------
-// Helpers
-// --------------------
 const nowIso = () => new Date().toISOString();
 
 async function getColumnInfo(table: string, column: string): Promise<{ dataType?: string; columnType?: string } | null> {
@@ -27,7 +23,10 @@ async function getColumnInfo(table: string, column: string): Promise<{ dataType?
   );
 
   if (!row) return null;
-  return { dataType: String((row as any).DATA_TYPE ?? ''), columnType: String((row as any).COLUMN_TYPE ?? '') };
+  return {
+    dataType: String((row as any).DATA_TYPE ?? ''),
+    columnType: String((row as any).COLUMN_TYPE ?? ''),
+  };
 }
 
 async function columnExists(table: string, column: string): Promise<boolean> {
@@ -78,12 +77,6 @@ async function addIndexIfMissing(table: string, indexName: string, ddl: string):
   await mysqlExec(`ALTER TABLE \`${table}\` ADD ${ddl}`);
 }
 
-/**
- * Convierte valores ISO con "T" / "Z" a DATETIME.
- * - '2026-03-04T01:02:03.000Z' -> '2026-03-04 01:02:03'
- * - '2026-03-04 01:02:03' queda igual
- * - '2026-03-04' -> '2026-03-04 00:00:00'
- */
 async function ensureDateTimeColumn(table: string, column: string): Promise<void> {
   const info = await getColumnInfo(table, column);
   if (!info) return;
@@ -91,17 +84,12 @@ async function ensureDateTimeColumn(table: string, column: string): Promise<void
   const dt = (info.dataType ?? '').toLowerCase();
   if (dt === 'datetime' || dt === 'timestamp' || dt === 'date') return;
 
-  // Si es varchar/text, lo migramos a DATETIME de forma segura
-  // 1) Crear columna temporal
   const tmp = `${column}__dt`;
   const tmpExists = await columnExists(table, tmp);
   if (!tmpExists) {
     await mysqlExec(`ALTER TABLE \`${table}\` ADD COLUMN \`${tmp}\` DATETIME NULL AFTER \`${column}\``);
   }
 
-  // 2) Rellenar temporal intentando parsear:
-  // - si tiene 'T', reemplaza 'T' por ' ' y quita 'Z' y milisegundos
-  // - si solo es YYYY-MM-DD, agrega 00:00:00
   await mysqlExec(`
     UPDATE \`${table}\`
     SET \`${tmp}\` =
@@ -122,28 +110,26 @@ async function ensureDateTimeColumn(table: string, column: string): Promise<void
       END
   `);
 
-  // 3) Drop columna original y renombrar temporal
   await mysqlExec(`ALTER TABLE \`${table}\` DROP COLUMN \`${column}\``);
   await mysqlExec(`ALTER TABLE \`${table}\` CHANGE COLUMN \`${tmp}\` \`${column}\` DATETIME NULL`);
 
-  // 4) Si era NOT NULL en tu diseño, lo dejamos NOT NULL cuando aplique
-  // (para tus tablas lo queremos NOT NULL en date/created_at)
-  // OJO: primero aseguremos que no haya NULLs
-  if (['sales', 'expenses'].includes(table) && column === 'date') {
+  if (['sales', 'expenses', 'purchases'].includes(table) && column === 'date') {
     await mysqlExec(`UPDATE \`${table}\` SET \`${column}\` = NOW() WHERE \`${column}\` IS NULL`);
     await mysqlExec(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` DATETIME NOT NULL`);
   }
-  if (['sales', 'expenses', 'products', 'users', 'audit_logs'].includes(table) && column === 'created_at') {
+  if (
+    ['sales', 'expenses', 'products', 'users', 'audit_logs', 'suppliers', 'purchases', 'sale_returns', 'suspended_sales'].includes(table) &&
+    column === 'created_at'
+  ) {
     await mysqlExec(`UPDATE \`${table}\` SET \`${column}\` = NOW() WHERE \`${column}\` IS NULL`);
     await mysqlExec(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` DATETIME NOT NULL`);
   }
-  if (table === 'products' && column === 'updated_at') {
+  if (['products', 'suppliers', 'suspended_sales'].includes(table) && column === 'updated_at') {
     await mysqlExec(`UPDATE \`${table}\` SET \`${column}\` = NOW() WHERE \`${column}\` IS NULL`);
     await mysqlExec(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` DATETIME NOT NULL`);
   }
 }
 
-// Seed admin (opcional)
 async function seedAdminIfMissing(): Promise<void> {
   const adminEmail = 'admin@sistetecni.com';
   const exists = await mysqlQueryOne<{ id: string }>(
@@ -162,11 +148,7 @@ async function seedAdminIfMissing(): Promise<void> {
   );
 }
 
-// --------------------
-// MAIN
-// --------------------
 export async function initMySqlSchema(): Promise<{ ok: true }> {
-  // 1) TABLAS BASE (con DATETIME correcto)
   await mysqlExec(`
     CREATE TABLE IF NOT EXISTS users (
       id VARCHAR(36) PRIMARY KEY,
@@ -275,7 +257,6 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
     );
   `);
 
-  // 1.1) ✅ NUEVO: si tu código usa cash_sessions (para turnos), créala también
   await mysqlExec(`
     CREATE TABLE IF NOT EXISTS cash_sessions (
       id VARCHAR(36) PRIMARY KEY,
@@ -301,29 +282,143 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
       note VARCHAR(255) NULL,
       created_at DATETIME NOT NULL,
       INDEX idx_cash_movements_session (session_id),
-      INDEX idx_cash_movements_created (created_at),
-      CONSTRAINT fk_cash_movements_session
-        FOREIGN KEY (session_id) REFERENCES cash_sessions(id)
-        ON DELETE CASCADE
+      INDEX idx_cash_movements_created (created_at)
     );
   `);
 
-  // 2) ✅ Migración segura de producto general (COLUMNAS NUEVAS)
+  /* =========================
+     NUEVO: VENTAS SUSPENDIDAS
+  ========================= */
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS suspended_sales (
+      id VARCHAR(36) PRIMARY KEY,
+      temp_number VARCHAR(60) NOT NULL UNIQUE,
+      user_id VARCHAR(36) NOT NULL,
+      customer_name VARCHAR(255) NULL,
+      customer_id VARCHAR(120) NULL,
+      subtotal INT NOT NULL DEFAULT 0,
+      discount INT NOT NULL DEFAULT 0,
+      total INT NOT NULL DEFAULT 0,
+      payment_method VARCHAR(40) NOT NULL DEFAULT 'EFECTIVO',
+      notes TEXT NULL,
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME NOT NULL,
+      INDEX idx_suspended_sales_created_at (created_at),
+      INDEX idx_suspended_sales_user_id (user_id)
+    );
+  `);
+
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS suspended_sale_items (
+      id VARCHAR(36) PRIMARY KEY,
+      suspended_sale_id VARCHAR(36) NOT NULL,
+      product_id VARCHAR(36) NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      qty INT NOT NULL,
+      unit_price INT NOT NULL,
+      line_total INT NOT NULL,
+      stock INT NULL,
+      unit_cost DOUBLE NOT NULL DEFAULT 0,
+      INDEX idx_suspended_sale_items_sale (suspended_sale_id),
+      INDEX idx_suspended_sale_items_product (product_id)
+    );
+  `);
+
+  /* =========================
+     NUEVO: DEVOLUCIONES
+  ========================= */
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS sale_returns (
+      id VARCHAR(36) PRIMARY KEY,
+      sale_id VARCHAR(36) NOT NULL,
+      user_id VARCHAR(36) NOT NULL,
+      reason TEXT NULL,
+      total_returned INT NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL,
+      INDEX idx_sale_returns_sale_id (sale_id),
+      INDEX idx_sale_returns_created_at (created_at)
+    );
+  `);
+
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS sale_return_items (
+      id VARCHAR(36) PRIMARY KEY,
+      return_id VARCHAR(36) NOT NULL,
+      sale_item_id VARCHAR(36) NOT NULL,
+      product_id VARCHAR(36) NULL,
+      qty INT NOT NULL,
+      unit_price INT NOT NULL,
+      line_total INT NOT NULL,
+      description TEXT NULL,
+      INDEX idx_sale_return_items_return_id (return_id),
+      INDEX idx_sale_return_items_sale_item_id (sale_item_id)
+    );
+  `);
+
+  /* =========================
+     NUEVO: PROVEEDORES
+  ========================= */
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id VARCHAR(36) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      contact_name VARCHAR(255) NULL,
+      phone VARCHAR(80) NULL,
+      email VARCHAR(255) NULL,
+      address TEXT NULL,
+      notes TEXT NULL,
+      active TINYINT NOT NULL DEFAULT 1,
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME NOT NULL,
+      INDEX idx_suppliers_name (name)
+    );
+  `);
+
+  /* =========================
+     NUEVO: COMPRAS
+  ========================= */
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS purchases (
+      id VARCHAR(36) PRIMARY KEY,
+      supplier_id VARCHAR(36) NULL,
+      user_id VARCHAR(36) NOT NULL,
+      invoice_ref VARCHAR(120) NULL,
+      date DATETIME NOT NULL,
+      subtotal INT NOT NULL DEFAULT 0,
+      total INT NOT NULL DEFAULT 0,
+      notes TEXT NULL,
+      created_at DATETIME NOT NULL,
+      INDEX idx_purchases_date (date),
+      INDEX idx_purchases_supplier_id (supplier_id)
+    );
+  `);
+
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS purchase_items (
+      id VARCHAR(36) PRIMARY KEY,
+      purchase_id VARCHAR(36) NOT NULL,
+      product_id VARCHAR(36) NOT NULL,
+      qty INT NOT NULL,
+      unit_cost INT NOT NULL,
+      line_total INT NOT NULL,
+      INDEX idx_purchase_items_purchase_id (purchase_id),
+      INDEX idx_purchase_items_product_id (product_id)
+    );
+  `);
+
   await addColumnIfMissing('products', 'name', '`name` VARCHAR(255) NULL AFTER `id`');
   await addColumnIfMissing('products', 'category', '`category` VARCHAR(120) NULL AFTER `name`');
   await addColumnIfMissing('products', 'sku', '`sku` VARCHAR(64) NULL AFTER `category`');
   await addColumnIfMissing('products', 'barcode', '`barcode` VARCHAR(64) NULL AFTER `sku`');
-  await addColumnIfMissing('products', 'unit', "`unit` VARCHAR(20) NOT NULL DEFAULT 'UND' AFTER `barcode`");
+  await addColumnIfMissing('products', 'unit', "`unit` VARCHAR(20) NOT NULL DEFAULT 'UND' AFTER \`barcode\`");
   await addColumnIfMissing('products', 'min_stock', '`min_stock` INT NOT NULL DEFAULT 0 AFTER `stock`');
-  await addColumnIfMissing('products', 'status', "`status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' AFTER `active`");
+  await addColumnIfMissing('products', 'status', "`status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' AFTER \`active\`");
   await addColumnIfMissing('products', 'location', '`location` VARCHAR(120) NULL AFTER `notes`');
 
-  // 3) Índices para búsqueda/lector
   await addIndexIfMissing('products', 'idx_products_barcode', 'INDEX idx_products_barcode (`barcode`)');
   await addIndexIfMissing('products', 'idx_products_sku', 'INDEX idx_products_sku (`sku`)');
 
-  // 4) ✅ Migración: si ya tenías columnas de fecha como VARCHAR, pásalas a DATETIME
-  // Esto arregla: "gastos hoy = 0" y resúmenes en 0 cuando sí hay datos.
   await ensureDateTimeColumn('users', 'created_at');
   await ensureDateTimeColumn('products', 'created_at');
   await ensureDateTimeColumn('products', 'updated_at');
@@ -337,8 +432,14 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
   await ensureDateTimeColumn('cash_sessions', 'opened_at');
   await ensureDateTimeColumn('cash_sessions', 'closed_at');
   await ensureDateTimeColumn('cash_sessions', 'created_at');
+  await ensureDateTimeColumn('suppliers', 'created_at');
+  await ensureDateTimeColumn('suppliers', 'updated_at');
+  await ensureDateTimeColumn('purchases', 'date');
+  await ensureDateTimeColumn('purchases', 'created_at');
+  await ensureDateTimeColumn('sale_returns', 'created_at');
+  await ensureDateTimeColumn('suspended_sales', 'created_at');
+  await ensureDateTimeColumn('suspended_sales', 'updated_at');
 
-  // 5) seed admin
   await seedAdminIfMissing();
 
   return { ok: true };

@@ -564,3 +564,289 @@ export const reportSummary = (from: string, to: string): unknown =>
           WHERE s.date BETWEEN ? AND ?) as total_costs`,
     )
     .get(from, to, from, to, from, to);
+    /* =========================
+   VENTAS SUSPENDIDAS
+========================= */
+
+
+
+
+
+
+/* =========================
+   HISTORIAL DE VENTAS
+========================= */
+
+
+
+/* =========================
+   DEVOLUCIONES
+========================= */
+
+export const createSaleReturn = (data: any): string => {
+  const db = getDb();
+  const returnId = uuid();
+  const now = new Date().toISOString();
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO sale_returns
+      (id,sale_id,user_id,reason,total_returned,created_at)
+      VALUES (?,?,?,?,?,?)
+    `).run(
+      returnId,
+      data.saleId,
+      data.userId,
+      data.reason ?? '',
+      data.total ?? 0,
+      now
+    );
+
+    for (const item of data.items ?? []) {
+      db.prepare(`
+        INSERT INTO sale_return_items
+        (id,return_id,sale_item_id,product_id,qty,unit_price,line_total,description)
+        VALUES (?,?,?,?,?,?,?,?)
+      `).run(
+        uuid(),
+        returnId,
+        item.sale_item_id,
+        item.product_id,
+        item.qty,
+        item.unit_price,
+        item.line_total,
+        item.description ?? ''
+      );
+
+      if (item.product_id) {
+        db.prepare(`
+          UPDATE products
+          SET stock = stock + ?
+          WHERE id = ?
+        `).run(item.qty, item.product_id);
+      }
+    }
+  });
+
+  tx();
+
+  return returnId;
+};
+
+/* =========================
+   PROVEEDORES
+========================= */
+
+export const listSuppliers = (): unknown[] =>
+  getDb()
+    .prepare(`SELECT * FROM suppliers WHERE active=1 ORDER BY name`)
+    .all();
+
+export const createSupplier = (data: any): string => {
+  const id = uuid();
+  const now = new Date().toISOString();
+
+  getDb()
+    .prepare(`
+      INSERT INTO suppliers
+      (id,name,contact_name,phone,email,address,notes,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?)
+    `)
+    .run(
+      id,
+      data.name,
+      data.contact_name ?? '',
+      data.phone ?? '',
+      data.email ?? '',
+      data.address ?? '',
+      data.notes ?? '',
+      now,
+      now
+    );
+
+  return id;
+};
+
+/* =========================
+   COMPRAS
+========================= */
+
+export const createPurchase = (data: any): string => {
+  const db = getDb();
+  const id = uuid();
+  const now = new Date().toISOString();
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO purchases
+      (id,supplier_id,user_id,invoice_ref,date,subtotal,total,notes,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?)
+    `).run(
+      id,
+      data.supplier_id ?? null,
+      data.userId,
+      data.invoice_ref ?? '',
+      now,
+      data.subtotal ?? 0,
+      data.total ?? 0,
+      data.notes ?? '',
+      now
+    );
+
+    for (const item of data.items ?? []) {
+      db.prepare(`
+        INSERT INTO purchase_items
+        (id,purchase_id,product_id,qty,unit_cost,line_total)
+        VALUES (?,?,?,?,?,?)
+      `).run(
+        uuid(),
+        id,
+        item.product_id,
+        item.qty,
+        item.unit_cost,
+        item.line_total
+      );
+
+      db.prepare(`
+        UPDATE products
+        SET stock = stock + ?, purchase_price = ?
+        WHERE id = ?
+      `).run(
+        item.qty,
+        item.unit_cost,
+        item.product_id
+      );
+    }
+  });
+
+  tx();
+
+  return id;
+};
+
+/* =========================
+   VENTAS SUSPENDIDAS
+========================= */
+
+export const suspendSale = (data: any): string => {
+  const db = getDb();
+  const id = uuid();
+  const tempNumber = `TMP-${Date.now()}`;
+  const now = new Date().toISOString();
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO suspended_sales
+      (id,temp_number,user_id,customer_name,customer_id,subtotal,discount,total,payment_method,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      id,
+      tempNumber,
+      data.userId,
+      data.customerName ?? '',
+      data.customerId ?? '',
+      data.subtotal ?? 0,
+      data.discount ?? 0,
+      data.total ?? 0,
+      data.paymentMethod ?? 'EFECTIVO',
+      now,
+      now
+    );
+
+    for (const item of data.items ?? []) {
+      db.prepare(`
+        INSERT INTO suspended_sale_items
+        (id,suspended_sale_id,product_id,name,description,qty,unit_price,line_total,stock,unit_cost)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        uuid(),
+        id,
+        item.product_id,
+        item.name,
+        item.description ?? '',
+        item.qty,
+        item.unit_price,
+        item.line_total,
+        item.stock ?? null,
+        item.unit_cost ?? 0
+      );
+    }
+  });
+
+  tx();
+  return id;
+};
+
+export const listSuspendedSales = (): unknown[] =>
+  getDb()
+    .prepare(`
+      SELECT id,temp_number,customer_name,total,created_at
+      FROM suspended_sales
+      ORDER BY created_at DESC
+    `)
+    .all();
+
+export const getSuspendedSale = (id: string): any => {
+  const db = getDb();
+
+  const sale = db
+    .prepare(`SELECT * FROM suspended_sales WHERE id = ?`)
+    .get(id);
+
+  if (!sale) return null;
+
+  const items = db
+    .prepare(`
+      SELECT *
+      FROM suspended_sale_items
+      WHERE suspended_sale_id = ?
+    `)
+    .all(id);
+
+  return { ...sale, items };
+};
+
+export const deleteSuspendedSale = (id: string): void => {
+  const db = getDb();
+
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM suspended_sale_items WHERE suspended_sale_id=?`).run(id);
+    db.prepare(`DELETE FROM suspended_sales WHERE id=?`).run(id);
+  });
+
+  tx();
+};
+
+/* =========================
+   HISTORIAL DE VENTAS
+========================= */
+
+export const listRecentSales = (limit = 20): unknown[] =>
+  getDb()
+    .prepare(`
+      SELECT id,invoice_number,date,total,payment_method,customer_name
+      FROM sales
+      ORDER BY date DESC
+      LIMIT ?
+    `)
+    .all(limit);
+
+export const getSaleDetail = (saleId: string): any => {
+  const db = getDb();
+
+  const sale = db
+    .prepare(`SELECT * FROM sales WHERE id = ?`)
+    .get(saleId);
+
+  if (!sale) return null;
+
+  const items = db
+    .prepare(`
+      SELECT *
+      FROM sale_items
+      WHERE sale_id = ?
+    `)
+    .all(saleId);
+
+  return { ...sale, items };
+};

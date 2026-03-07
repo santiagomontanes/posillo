@@ -26,9 +26,6 @@ function getTableColumns(db: Database.Database, table: string): string[] {
 }
 
 export const runMigrations = (db: Database.Database): void => {
-  // =========================
-  // BASE TABLES
-  // =========================
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -119,11 +116,121 @@ export const runMigrations = (db: Database.Database): void => {
       difference INTEGER,
       notes TEXT
     );
+
+    /* =========================
+       NUEVO: VENTAS SUSPENDIDAS
+    ========================= */
+    CREATE TABLE IF NOT EXISTS suspended_sales (
+      id TEXT PRIMARY KEY,
+      temp_number TEXT NOT NULL UNIQUE,
+      user_id TEXT NOT NULL,
+      customer_name TEXT,
+      customer_id TEXT,
+      subtotal INTEGER NOT NULL DEFAULT 0,
+      discount INTEGER NOT NULL DEFAULT 0,
+      total INTEGER NOT NULL DEFAULT 0,
+      payment_method TEXT NOT NULL DEFAULT 'EFECTIVO',
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS suspended_sale_items (
+      id TEXT PRIMARY KEY,
+      suspended_sale_id TEXT NOT NULL,
+      product_id TEXT,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      qty INTEGER NOT NULL,
+      unit_price INTEGER NOT NULL,
+      line_total INTEGER NOT NULL,
+      stock INTEGER,
+      unit_cost REAL NOT NULL DEFAULT 0,
+      FOREIGN KEY (suspended_sale_id) REFERENCES suspended_sales(id),
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+
+    /* =========================
+       NUEVO: DEVOLUCIONES
+    ========================= */
+    CREATE TABLE IF NOT EXISTS sale_returns (
+      id TEXT PRIMARY KEY,
+      sale_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      reason TEXT,
+      total_returned INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (sale_id) REFERENCES sales(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS sale_return_items (
+      id TEXT PRIMARY KEY,
+      return_id TEXT NOT NULL,
+      sale_item_id TEXT NOT NULL,
+      product_id TEXT,
+      qty INTEGER NOT NULL,
+      unit_price INTEGER NOT NULL,
+      line_total INTEGER NOT NULL,
+      description TEXT DEFAULT '',
+      FOREIGN KEY (return_id) REFERENCES sale_returns(id),
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+
+    /* =========================
+       NUEVO: PROVEEDORES
+    ========================= */
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      contact_name TEXT,
+      phone TEXT,
+      email TEXT,
+      address TEXT,
+      notes TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    /* =========================
+       NUEVO: COMPRAS
+    ========================= */
+    CREATE TABLE IF NOT EXISTS purchases (
+      id TEXT PRIMARY KEY,
+      supplier_id TEXT,
+      user_id TEXT NOT NULL,
+      invoice_ref TEXT,
+      date TEXT NOT NULL,
+      subtotal INTEGER NOT NULL DEFAULT 0,
+      total INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_items (
+      id TEXT PRIMARY KEY,
+      purchase_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      qty INTEGER NOT NULL,
+      unit_cost INTEGER NOT NULL,
+      line_total INTEGER NOT NULL,
+      FOREIGN KEY (purchase_id) REFERENCES purchases(id),
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_suspended_sales_created_at ON suspended_sales(created_at);
+    CREATE INDEX IF NOT EXISTS idx_suspended_sale_items_sale ON suspended_sale_items(suspended_sale_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_returns_sale_id ON sale_returns(sale_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_return_items_return_id ON sale_return_items(return_id);
+    CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name);
+    CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases(date);
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase_id ON purchase_items(purchase_id);
   `);
 
-  // =========================
-  // SAFE USERS SCHEMA CHECK
-  // =========================
   const userColsBefore = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
   const usersSchema = db
     .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
@@ -132,18 +239,15 @@ export const runMigrations = (db: Database.Database): void => {
   const usersHasSupervisor = usersSchema?.sql?.includes("'SUPERVISOR'") ?? false;
   const usersHasCreatedAt = userColsBefore.some((c) => c.name === 'created_at');
 
-  // Si falta SUPERVISOR en CHECK o falta created_at, migrar users de forma segura
   if (!usersHasSupervisor || !usersHasCreatedAt) {
     const now = new Date().toISOString();
 
     db.exec('PRAGMA foreign_keys=OFF');
 
-    // 1) Si existe VIEW users_old, borrarlo (FK no funciona con views)
     if (viewExists(db, 'users_old')) {
       db.exec('DROP VIEW IF EXISTS users_old');
     }
 
-    // 2) Asegurar users_old como tabla temporal si hace falta renombrar
     const usersExists = tableExists(db, 'users');
     const usersOldExists = tableExists(db, 'users_old');
 
@@ -151,7 +255,6 @@ export const runMigrations = (db: Database.Database): void => {
       db.exec('ALTER TABLE users RENAME TO users_old');
     }
 
-    // 3) Crear tabla users final
     db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -163,7 +266,6 @@ export const runMigrations = (db: Database.Database): void => {
       );
     `);
 
-    // 4) Migrar desde users_old solo si existe
     if (tableExists(db, 'users_old')) {
       const oldCols = getTableColumns(db, 'users_old');
       const oldHasCreatedAt = oldCols.includes('created_at');
@@ -198,21 +300,12 @@ export const runMigrations = (db: Database.Database): void => {
     db.exec('PRAGMA foreign_keys=ON');
   }
 
-  // =========================
-  // COMPAT MODE (NO CAMBIAR FUNCIONES):
-  // Mantener users_old como TABLA REAL + sincronizada
-  // Esto evita:
-  // - "no such table: users_old"
-  // - "foreign key mismatch ... audit_logs referencing users_old"
-  // =========================
   db.exec('PRAGMA foreign_keys=OFF');
 
-  // Si existe como VIEW, eliminarlo
   if (viewExists(db, 'users_old')) {
     db.exec('DROP VIEW IF EXISTS users_old');
   }
 
-  // Si users_old no existe como tabla, crearla y copiar desde users
   if (!tableExists(db, 'users_old')) {
     db.exec(`
       CREATE TABLE users_old (
@@ -228,11 +321,9 @@ export const runMigrations = (db: Database.Database): void => {
       SELECT id,name,email,password_hash,role,created_at FROM users;
     `);
   } else {
-    // Si existe, asegurar columnas mínimas (si tu users_old vieja era distinta, la “rellenamos”)
     const uoCols = getTableColumns(db, 'users_old');
     const missingCreatedAt = !uoCols.includes('created_at');
 
-    // Si está muy vieja (sin created_at), la reconstruimos sin perder datos básicos
     if (missingCreatedAt) {
       const now = new Date().toISOString();
       db.exec(`
@@ -261,14 +352,12 @@ export const runMigrations = (db: Database.Database): void => {
       `);
     }
 
-    // Backfill por si users tiene nuevos usuarios
     db.exec(`
       INSERT OR IGNORE INTO users_old (id,name,email,password_hash,role,created_at)
       SELECT id,name,email,password_hash,role,created_at FROM users;
     `);
   }
 
-  // Triggers: users -> users_old (sincronización)
   db.exec(`
     DROP TRIGGER IF EXISTS trg_users_to_users_old_insert;
     DROP TRIGGER IF EXISTS trg_users_to_users_old_update;
@@ -297,30 +386,21 @@ export const runMigrations = (db: Database.Database): void => {
 
   db.exec('PRAGMA foreign_keys=ON');
 
-  // =========================
-// PRODUCTS MIGRATION (universal + barcode)
-// =========================
-const productCols = db.prepare('PRAGMA table_info(products)').all() as Array<{ name: string }>;
-const has = (col: string) => productCols.some((c) => c.name === col);
+  const productCols = db.prepare('PRAGMA table_info(products)').all() as Array<{ name: string }>;
+  const has = (col: string) => productCols.some((c) => c.name === col);
 
-if (!has('active')) db.exec('ALTER TABLE products ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+  if (!has('active')) db.exec('ALTER TABLE products ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+  if (!has('name')) db.exec('ALTER TABLE products ADD COLUMN name TEXT');
+  if (!has('category')) db.exec('ALTER TABLE products ADD COLUMN category TEXT');
+  if (!has('sku')) db.exec('ALTER TABLE products ADD COLUMN sku TEXT');
+  if (!has('barcode')) db.exec('ALTER TABLE products ADD COLUMN barcode TEXT');
+  if (!has('unit')) db.exec("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'UND'");
+  if (!has('min_stock')) db.exec('ALTER TABLE products ADD COLUMN min_stock INTEGER DEFAULT 0');
+  if (!has('status')) db.exec("ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'ACTIVE'");
+  if (!has('location')) db.exec('ALTER TABLE products ADD COLUMN location TEXT');
 
-// ✅ Campos universales (no rompen tu modelo actual)
-if (!has('name')) db.exec('ALTER TABLE products ADD COLUMN name TEXT');
-if (!has('category')) db.exec('ALTER TABLE products ADD COLUMN category TEXT');
-if (!has('sku')) db.exec('ALTER TABLE products ADD COLUMN sku TEXT');
-if (!has('barcode')) db.exec('ALTER TABLE products ADD COLUMN barcode TEXT');
-if (!has('unit')) db.exec("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'UND'");
-if (!has('min_stock')) db.exec('ALTER TABLE products ADD COLUMN min_stock INTEGER DEFAULT 0');
-if (!has('status')) db.exec("ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'ACTIVE'");
-if (!has('location')) db.exec('ALTER TABLE products ADD COLUMN location TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)');
 
-// Índice para buscar rápido por código de barras
-db.exec('CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)');
-
-  // =========================
-  // SALE ITEMS MIGRATION
-  // =========================
   const saleItemCols = db.prepare('PRAGMA table_info(sale_items)').all() as Array<{ name: string; notnull: number }>;
   const hasDescription = saleItemCols.some((c) => c.name === 'description');
   const hasUnitCost = saleItemCols.some((c) => c.name === 'unit_cost');
@@ -351,9 +431,6 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)');
     if (!hasUnitCost) db.exec('ALTER TABLE sale_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
   }
 
-  // =========================
-  // CASH MIGRATION
-  // =========================
   const cashCols = db.prepare('PRAGMA table_info(cash_closures)').all() as Array<{ name: string }>;
   if (!cashCols.some((c) => c.name === 'opening_notes')) {
     db.exec('ALTER TABLE cash_closures ADD COLUMN opening_notes TEXT');
@@ -378,4 +455,4 @@ export const seedDefaultAdmin = (db: Database.Database): void => {
     'ADMIN',
     now,
   );
-}; 
+};

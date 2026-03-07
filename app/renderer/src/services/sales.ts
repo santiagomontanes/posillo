@@ -1,5 +1,31 @@
 import { ipc } from './ipcClient';
 import { getAuthContext } from './session';
 
-export const createSale = (p: unknown) => ipc.sales.create({ ...getAuthContext(), sale: p });
-export const printInvoice = (html: string) => ipc.sales.printInvoice({ ...getAuthContext(), html });
+export const createSale = (sale: unknown) =>
+  ipc.sales.create({ ...getAuthContext(), sale });
+
+export const printInvoice = (html: string) =>
+  ipc.sales.printInvoice({ ...getAuthContext(), html });
+
+export const suspendSale = (sale: unknown) =>
+  ipc.sales.suspend({ ...getAuthContext(), sale });
+
+export const listSuspendedSales = () =>
+  ipc.sales.listSuspended({ ...getAuthContext() });
+
+export const getSuspendedSale = (id: string) =>
+  ipc.sales.getSuspended({ ...getAuthContext(), id });
+
+export const deleteSuspendedSale = (id: string) =>
+  ipc.sales.deleteSuspended({ ...getAuthContext(), id });
+
+export const listRecentSales = (limit = 30) =>
+  ipc.sales.listRecent({ ...getAuthContext(), limit });
+
+export const getSaleDetail = (id: string) =>
+  ipc.sales.getDetail({ ...getAuthContext(), id });
+
+
+
+export const returnSale = (data: any) =>
+  ipc.sales.return({ ...getAuthContext(), ...data });
