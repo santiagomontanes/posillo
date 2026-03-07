@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { useEffect, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 
 export function RequireLicense({ children }: { children: JSX.Element }) {
   const api = (window as any).api;
 
   if (!api?.license?.status) {
     return (
-      <div style={{ padding: 24, color: "white" }}>
+      <div style={{ padding: 24, color: 'white' }}>
         API de licencia no disponible (preload)
       </div>
     );
@@ -20,16 +20,15 @@ export function RequireLicense({ children }: { children: JSX.Element }) {
 
     (async () => {
       try {
-        // 1) Si existe checkOnline, intenta revalidar con internet
+        // intenta validar online si hay internet
         if (api?.license?.checkOnline) {
           try {
             await api.license.checkOnline();
           } catch {
-            // si falla internet o server, seguimos con estado local
+            // si no hay internet o falla el servidor, sigue con validación local
           }
         }
 
-        // 2) Siempre revisa estado local
         const res = await api.license.status();
 
         if (!mounted) return;
@@ -49,7 +48,11 @@ export function RequireLicense({ children }: { children: JSX.Element }) {
   }, [api]);
 
   if (loading) {
-    return <div style={{ padding: 24, color: "white" }}>Verificando licencia...</div>;
+    return (
+      <div style={{ padding: 24, color: 'white' }}>
+        Verificando licencia...
+      </div>
+    );
   }
 
   if (!ok) {

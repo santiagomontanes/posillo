@@ -84,7 +84,6 @@ app.whenReady().then(async () => {
   registerMySqlIpc();
   registerCashDrawerIpc();
 
-  // DB local (SQLite) siempre se crea
   getDb();
 
   registerAuthIpc();
