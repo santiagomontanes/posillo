@@ -11,6 +11,7 @@ const titles: Record<string, string> = {
   '/settings': 'Configuración',
   '/users': 'Usuarios',
   '/audit': 'Auditoría',
+  '/daily-close': 'Cierre diario',
 };
 
 export const Topbar = ({ user, onLogout }: { user: User | null; onLogout: () => void }) => {
@@ -27,6 +28,8 @@ export const Topbar = ({ user, onLogout }: { user: User | null; onLogout: () => 
       </div>
 
       <div className="topbar__right">
+        <div className="topbar__badge">Sistema activo</div>
+
         <button className="btn btn--ghost" onClick={onLogout}>
           Cerrar sesión
         </button>

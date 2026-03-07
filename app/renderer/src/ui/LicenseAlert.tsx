@@ -69,7 +69,7 @@ export const LicenseAlert = () => {
   }, []);
 
   if (daysLeft === null) return null;
-  if (daysLeft > 99) return null;
+  if (daysLeft > 7) return null;
 
   const whatsappNumber = '573043547758';
 

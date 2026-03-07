@@ -47,6 +47,13 @@ export const Sidebar = ({ role }: { role: Role }) => {
             );
           })}
       </nav>
+
+      <div className="sidebar__footer">
+        <div className="sidebar__footer-title">Sistetecni POS</div>
+        <div className="sidebar__footer-text">
+          Software hecho por colombianos 🇨🇴
+        </div>
+      </div>
     </aside>
   );
 };
