@@ -1,0 +1,3 @@
+-- Usuario inicial:
+-- email: admin@sistetecni.com
+-- password: Admin123*

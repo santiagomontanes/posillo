@@ -1,0 +1,1 @@
+-- Esquema base POS Sistetecni (ver app/electron/db/migrations.ts)

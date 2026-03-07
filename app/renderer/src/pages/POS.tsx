@@ -1,0 +1,658 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { getProductByBarcode, listPosProducts } from '../services/products';
+import { createSale, printInvoice } from '../services/sales';
+import { Modal } from '../ui/Modal';
+import { buildInvoiceHtml } from '../invoice/invoiceTemplate';
+import { getConfig } from '../services/config';
+
+type CartItem = {
+  cart_id: string;
+  product_id: string | null;
+  description?: string;
+  name: string;
+  qty: number;
+  unit_price: number;
+  line_total: number;
+  stock: number | null;
+  unit_cost: number;
+};
+
+const money = (n: number): string => {
+  const v = Number(n || 0);
+  const formatted = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(v);
+  return `$${formatted}`;
+};
+
+export const POS = ({ user }: { user: any }) => {
+  // =========================
+  // Scanner (pistola)
+  // =========================
+  const scanRef = useRef<HTMLInputElement | null>(null);
+  const [scanValue, setScanValue] = useState('');
+  const scanTimer = useRef<number | null>(null);
+
+  const focusScanner = (): void => {
+    setTimeout(() => scanRef.current?.focus(), 0);
+  };
+
+  // =========================
+  // States
+  // =========================
+  const [q, setQ] = useState('');
+  const [products, setProducts] = useState<any[]>([]);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [discount, setDiscount] = useState(0);
+  const [paymentMethod, setPayment] = useState('EFECTIVO');
+  const [message, setMessage] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const [freeOpen, setFreeOpen] = useState(false);
+  const [freeDescription, setFreeDescription] = useState('');
+  const [freePrice, setFreePrice] = useState(0);
+  const [freeCost, setFreeCost] = useState(0);
+  const [freeQty, setFreeQty] = useState(1);
+
+  const [cashReceivedStr, setCashReceivedStr] = useState('');
+
+  const [customerName, setCustomerName] = useState('');
+  const [customerId, setCustomerId] = useState('');
+
+  const [biz, setBiz] = useState<{ name?: string; logoDataUrl?: string }>({});
+
+  // =========================
+  // Focus scanner al cargar
+  // =========================
+  useEffect(() => {
+    focusScanner();
+  }, []);
+
+  // =========================
+  // Cargar productos POS
+  // =========================
+  useEffect(() => {
+    void listPosProducts(q).then(setProducts);
+  }, [q]);
+
+  // =========================
+  // Config negocio (logo/nombre)
+  // =========================
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await getConfig();
+        setBiz(cfg?.business ?? {});
+      } catch {
+        setBiz({});
+      }
+    })();
+  }, []);
+
+  // =========================
+  // NO robar foco si estás escribiendo
+  // =========================
+  const onRootClick = (e: React.MouseEvent) => {
+    const el = e.target as HTMLElement;
+    if (el.closest('input, textarea, select, button')) return;
+    focusScanner();
+  };
+
+  // =========================
+  // Helpers
+  // =========================
+  const subtotal = useMemo(() => cart.reduce((a, c) => a + c.line_total, 0), [cart]);
+  const total = Math.max(0, subtotal - discount);
+
+  const cashReceived = useMemo(() => {
+    const cleaned = cashReceivedStr.replace(/[^\d]/g, '');
+    return cleaned ? Number(cleaned) : 0;
+  }, [cashReceivedStr]);
+
+  const change = useMemo(() => Math.max(cashReceived - total, 0), [cashReceived, total]);
+  const missing = useMemo(() => Math.max(total - cashReceived, 0), [cashReceived, total]);
+
+  const mustHaveCash = paymentMethod === 'EFECTIVO';
+  const canConfirm = cart.length > 0 && !isProcessing && (!mustHaveCash || cashReceived >= total);
+
+  const displayName = (p: any): string => {
+    const n = String(p?.name ?? '').trim();
+    if (n) return n;
+    const legacy = `${p?.brand ?? ''} ${p?.model ?? ''}`.trim();
+    return legacy || 'Producto';
+  };
+
+  const setQty = (cartId: string, qty: number): void => {
+    setCart((current) =>
+      current.map((item) => {
+        if (item.cart_id !== cartId) return item;
+
+        if (item.stock == null) {
+          const safeQty = Math.max(1, qty);
+          return { ...item, qty: safeQty, line_total: safeQty * item.unit_price };
+        }
+
+        const safeQty = Math.max(1, Math.min(qty, item.stock));
+        if (qty > item.stock) {
+          setMessage(`Stock insuficiente para ${item.name}. Máximo disponible: ${item.stock}.`);
+        }
+
+        return { ...item, qty: safeQty, line_total: safeQty * item.unit_price };
+      }),
+    );
+  };
+
+  const addFromProduct = (p: any): void => {
+    setMessage('');
+
+    setCart((current) => {
+      const found = current.find((x) => x.product_id === p.id);
+      const stock = p.stock == null ? null : Number(p.stock);
+      const unitPrice = Number(p.sale_price ?? 0);
+
+      if (found) {
+        if (stock != null && stock > 0 && found.qty + 1 > stock) {
+          setMessage(`Stock insuficiente para ${displayName(p)}. Máximo disponible: ${stock}.`);
+          return current;
+        }
+
+        return current.map((x) =>
+          x.product_id === p.id
+            ? { ...x, qty: x.qty + 1, line_total: (x.qty + 1) * x.unit_price }
+            : x,
+        );
+      }
+
+      return [
+        ...current,
+        {
+          cart_id: `${p.id}-${Date.now()}`,
+          product_id: p.id,
+          name: displayName(p),
+          description: '',
+          qty: 1,
+          unit_price: unitPrice,
+          line_total: unitPrice,
+          stock,
+          unit_cost: Number(p.unit_cost ?? 0),
+        },
+      ];
+    });
+  };
+
+  // =========================
+  // Scanner auto (sin Enter)
+  // =========================
+  useEffect(() => {
+    if (scanTimer.current) window.clearTimeout(scanTimer.current);
+
+    const code = scanValue.trim();
+    if (!code) return;
+
+    scanTimer.current = window.setTimeout(async () => {
+      try {
+        if (code.length < 6) return;
+
+        const p = await getProductByBarcode(code);
+        if (!p) {
+          setMessage(`No existe producto con código: ${code}`);
+          return;
+        }
+
+        addFromProduct(p);
+        setScanValue('');
+        setMessage('');
+      } catch (err: any) {
+        setMessage(err?.message || 'Error leyendo código de barras.');
+      } finally {
+        focusScanner();
+      }
+    }, 250);
+
+    return () => {
+      if (scanTimer.current) window.clearTimeout(scanTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanValue]);
+
+  // Scanner con Enter (si el lector lo manda)
+  const onScanKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+
+    const code = scanValue.trim();
+    setScanValue('');
+    if (!code) return;
+
+    try {
+      const p = await getProductByBarcode(code);
+      if (!p) {
+        setMessage(`No existe producto con código: ${code}`);
+        return;
+      }
+
+      addFromProduct(p);
+      setMessage('');
+    } catch (err: any) {
+      setMessage(err?.message || 'Error leyendo código de barras.');
+    } finally {
+      focusScanner();
+    }
+  };
+
+  // =========================
+  // Ítem libre
+  // =========================
+  const addFreeItem = (): void => {
+    const description = freeDescription.trim();
+    if (!description) return setMessage('La descripción del ítem libre es obligatoria.');
+    if (freePrice < 0) return setMessage('El precio unitario no puede ser negativo.');
+    if (freeQty < 1) return setMessage('La cantidad debe ser mínimo 1.');
+    if (freeCost < 0) return setMessage('El costo unitario no puede ser negativo.');
+
+    const id = `free-${Date.now()}`;
+
+    setCart((current) => [
+      ...current,
+      {
+        cart_id: id,
+        product_id: null,
+        description,
+        name: description,
+        qty: freeQty,
+        unit_price: freePrice,
+        line_total: freeQty * freePrice,
+        stock: null,
+        unit_cost: freeCost,
+      },
+    ]);
+
+    setFreeDescription('');
+    setFreePrice(0);
+    setFreeCost(0);
+    setFreeQty(1);
+    setFreeOpen(false);
+    setMessage('');
+    focusScanner();
+  };
+
+  // =========================
+  // Carrito
+  // =========================
+  const removeItem = (cartId: string): void => {
+    setCart((current) => current.filter((i) => i.cart_id !== cartId));
+  };
+
+  const clearCart = (): void => {
+    setCart([]);
+    setDiscount(0);
+    setCashReceivedStr('');
+    setMessage('');
+    focusScanner();
+  };
+
+  // =========================
+  // Confirmar venta
+  // =========================
+  const confirm = async (): Promise<void> => {
+    if (isProcessing) return;
+    if (cart.length === 0) return setMessage('El carrito está vacío.');
+
+    if (paymentMethod === 'EFECTIVO' && cashReceived < total) {
+      return setMessage(`Falta dinero. Debes recibir mínimo ${money(total)}.`);
+    }
+
+    setIsProcessing(true);
+    setMessage('');
+
+    try {
+      const saleItems = cart.map((item) => ({
+        product_id: item.product_id,
+        name: item.name,
+        description: item.product_id ? '' : item.description ?? item.name,
+        qty: item.qty,
+        unit_price: item.unit_price,
+        line_total: item.line_total,
+        unit_cost: item.unit_cost,
+      }));
+
+      const res = await createSale({
+        userId: user.id,
+        items: saleItems,
+        subtotal,
+        discount,
+        total,
+        paymentMethod,
+        customerName: customerName?.trim() || '',
+        customerId: customerId?.trim() || '',
+        cashReceived: paymentMethod === 'EFECTIVO' ? cashReceived : 0,
+        cashChange: paymentMethod === 'EFECTIVO' ? change : 0,
+      });
+
+      const html = buildInvoiceHtml({
+        invoiceNumber: String(res.invoiceNumber ?? ''),
+        createdAt: new Date().toISOString(),
+        cashierName: user?.name || user?.email || 'Cajero',
+        paymentMethod,
+        customerName: customerName?.trim() || 'Consumidor final',
+        customerId: customerId?.trim() || '',
+        subtotal,
+        discount,
+        total,
+        cashReceived: paymentMethod === 'EFECTIVO' ? cashReceived : 0,
+        cashChange: paymentMethod === 'EFECTIVO' ? change : 0,
+        businessName: biz?.name || '',
+        businessLogoDataUrl: biz?.logoDataUrl || '',
+        items: cart.map((i: any) => ({
+          name: i.name,
+          description: i.description || '',
+          qty: Number(i.qty ?? 0),
+          unit_price: Number(i.unit_price ?? 0),
+          line_total: Number(i.line_total ?? 0),
+        })),
+      });
+
+      await printInvoice(html);
+
+      clearCart();
+      setMessage(`Venta realizada. Factura #${String(res.invoiceNumber ?? '')}`);
+    } catch (e: any) {
+      setMessage(e?.message || 'No se pudo confirmar la venta.');
+    } finally {
+      setIsProcessing(false);
+      focusScanner();
+    }
+  };
+
+  // =========================
+  // Métodos de pago
+  // =========================
+  const paymentOptions = ['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'BANCOLOMBIA', 'TARJETA', 'ADDI', 'OTRO'];
+
+  return (
+    <div className="pos" onClick={onRootClick}>
+      {/* Input invisible para escáner */}
+      <input
+        ref={scanRef}
+        value={scanValue}
+        onChange={(e) => setScanValue(e.target.value)}
+        onKeyDown={onScanKeyDown}
+        style={{
+          position: 'absolute',
+          opacity: 0,
+          height: 1,
+          width: 1,
+          left: -9999,
+        }}
+      />
+
+      {/* IZQUIERDA */}
+      <section className="pos__left card">
+        <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+          {biz?.logoDataUrl ? (
+            <img
+              src={biz.logoDataUrl}
+              alt="logo"
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 14,
+                objectFit: 'contain',
+                background: 'rgba(255,255,255,.06)',
+                padding: 6,
+              }}
+            />
+          ) : (
+            <div className="sidebar__logo">S</div>
+          )}
+
+          <div>
+            <div style={{ fontWeight: 1000, fontSize: 18 }}>
+              Bienvenido{biz?.name ? ` a ${biz.name}` : ''}
+            </div>
+            <div className="sidebar__subtitle">Powered by Sistetecni POS</div>
+          </div>
+        </div>
+
+        {/* Buscar o escanear en el input visible */}
+        <div className="pos__search">
+          <input
+            placeholder="Buscar o escanear código"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={async (e) => {
+              if (e.key !== 'Enter') return;
+
+              const code = q.trim();
+              if (!code) return;
+
+              try {
+                const p = await getProductByBarcode(code);
+
+                if (!p) {
+                  setMessage(`No existe producto con código: ${code}`);
+                  return;
+                }
+
+                addFromProduct(p);
+                setQ('');
+                setMessage('');
+              } catch (err: any) {
+                setMessage(err?.message || 'Error leyendo código de barras.');
+              }
+            }}
+          />
+
+          <button className="btn" onClick={() => setFreeOpen(true)}>
+            Ítem libre
+          </button>
+        </div>
+
+        <div className="pos__products">
+          {products.map((p: any) => (
+            <button
+              key={p.id}
+              className="pos__product"
+              onClick={() => addFromProduct(p)}
+              disabled={isProcessing || (p.stock ?? 0) <= 0}
+              title={(p.stock ?? 0) <= 0 ? 'Sin stock' : 'Agregar'}
+            >
+              <div className="pos__product-title">{displayName(p)}</div>
+              <div className="pos__product-sub">
+                <span>{String(p?.sku ?? p?.barcode ?? p?.cpu ?? '').trim() || '—'}</span>
+                <span>Stock: {p.stock}</span>
+              </div>
+              <div className="pos__product-price">{money(Number(p.sale_price ?? 0))}</div>
+            </button>
+          ))}
+
+          {products.length === 0 && (
+            <div style={{ opacity: 0.85, padding: 10 }}>No hay productos para mostrar.</div>
+          )}
+        </div>
+      </section>
+
+      {/* DERECHA */}
+      <section className="pos__right card">
+        <div className="pos__right-header">
+          <h3 style={{ margin: 0 }}>Carrito</h3>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn--ghost" onClick={clearCart} disabled={isProcessing}>
+              Vaciar
+            </button>
+            <button className="btn btn--ghost" onClick={clearCart} disabled={isProcessing}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+
+        <div className="pos__cart">
+          {cart.map((i) => (
+            <div key={i.cart_id} className="pos__cart-row">
+              <div className="pos__cart-info">
+                <div className="pos__cart-name">{i.name}</div>
+                <div className="pos__cart-meta">
+                  <span>{money(i.unit_price)} c/u</span>
+                  {i.stock != null && <span>Disp: {i.stock}</span>}
+                </div>
+              </div>
+
+              <div className="pos__qty">
+                <button className="qtybtn" onClick={() => setQty(i.cart_id, i.qty - 1)} disabled={isProcessing}>
+                  −
+                </button>
+                <input
+                  className="qtyinput"
+                  type="number"
+                  min={1}
+                  max={i.stock ?? undefined}
+                  value={i.qty}
+                  disabled={isProcessing}
+                  onChange={(e) => setQty(i.cart_id, Number(e.target.value || 1))}
+                />
+                <button className="qtybtn" onClick={() => setQty(i.cart_id, i.qty + 1)} disabled={isProcessing}>
+                  +
+                </button>
+              </div>
+
+              <div className="pos__line-total">{money(i.line_total)}</div>
+
+              <button className="btn btn--ghost" onClick={() => removeItem(i.cart_id)} disabled={isProcessing}>
+                Eliminar
+              </button>
+            </div>
+          ))}
+
+          {cart.length === 0 && <div className="pos__empty">Agrega productos para iniciar una venta.</div>}
+        </div>
+
+        <div className="pos__pay card" style={{ marginTop: 12 }}>
+          <div className="pos__pay-row">
+            <span>Subtotal</span>
+            <b>{money(subtotal)}</b>
+          </div>
+
+          <div className="pos__pay-row" style={{ alignItems: 'center', gap: 10 }}>
+            <span>Descuento</span>
+            <input
+              style={{ width: 160 }}
+              type="number"
+              min={0}
+              value={discount}
+              disabled={isProcessing}
+              onChange={(e) => setDiscount(Math.max(0, Number(e.target.value || 0)))}
+              placeholder="0"
+            />
+          </div>
+
+          <div className="pos__pay-method">
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Método de pago</div>
+            <div className="pos__chips">
+              {paymentOptions.map((opt) => (
+                <button
+                  key={opt}
+                  className={`chip ${paymentMethod === opt ? 'chip--active' : ''}`}
+                  onClick={() => setPayment(opt)}
+                  disabled={isProcessing}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {paymentMethod === 'EFECTIVO' && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>Pago en efectivo</div>
+
+              <div className="pos__pay-row" style={{ alignItems: 'center', gap: 10 }}>
+                <span>Efectivo recibido</span>
+                <input
+                  style={{ width: 160 }}
+                  inputMode="numeric"
+                  value={cashReceivedStr}
+                  disabled={isProcessing}
+                  onChange={(e) => setCashReceivedStr(e.target.value)}
+                  placeholder="Ej: 20000"
+                />
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <div style={{ opacity: 0.85 }}>CAMBIO A DEVOLVER:</div>
+                <div style={{ fontSize: 26, fontWeight: 900 }}>{money(change)}</div>
+              </div>
+
+              {missing > 0 && (
+                <div className="pos__msg" style={{ marginTop: 8 }}>
+                  Falta: <b>{money(missing)}</b>
+                </div>
+              )}
+            </div>
+          )}
+
+          {message && <div className="pos__msg">{message}</div>}
+
+          <div className="pos__total">
+            <div>Total</div>
+            <div className="pos__total-amount">{money(total)}</div>
+          </div>
+
+          <button className="pos__confirm" onClick={confirm} disabled={!canConfirm}>
+            {isProcessing ? 'Procesando...' : 'Cobrar'}
+          </button>
+        </div>
+      </section>
+
+      {/* MODAL ITEM LIBRE */}
+      <Modal open={freeOpen} onClose={isProcessing ? undefined : () => setFreeOpen(false)}>
+        <h3>Agregar ítem libre</h3>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+          <b>Descripción</b>
+          <input
+            value={freeDescription}
+            onChange={(e) => setFreeDescription(e.target.value)}
+            placeholder="Ej: Servicio formateo"
+          />
+        </label>
+
+        <div className="grid grid-2">
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <b>Precio unitario</b>
+            <input
+              type="number"
+              min={0}
+              value={freePrice}
+              onChange={(e) => setFreePrice(Math.max(0, Number(e.target.value || 0)))}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <b>Costo unitario (opcional)</b>
+            <input
+              type="number"
+              min={0}
+              value={freeCost}
+              onChange={(e) => setFreeCost(Math.max(0, Number(e.target.value || 0)))}
+            />
+          </label>
+        </div>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+          <b>Cantidad</b>
+          <input
+            type="number"
+            min={1}
+            value={freeQty}
+            onChange={(e) => setFreeQty(Math.max(1, Number(e.target.value || 1)))}
+          />
+        </label>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+          <button className="btn" onClick={addFreeItem} disabled={isProcessing}>
+            Agregar
+          </button>
+          <button className="btn btn--ghost" onClick={() => setFreeOpen(false)} disabled={isProcessing}>
+            Cancelar
+          </button>
+        </div>
+      </Modal>
+    </div>
+  );
+};
