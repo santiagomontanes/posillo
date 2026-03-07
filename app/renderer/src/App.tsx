@@ -6,13 +6,24 @@ import { getSessionUser, setSessionUser } from './services/session';
 import { ChangePassword } from './pages/ChangePassword';
 import { BusinessSetup } from './pages/BusinessSetup';
 import { getConfig } from './services/config';
+import { SplashScreen } from './ui/SplashScreen';
 
 function App() {
+  const [showSplash, setShowSplash] = useState(true);
+
   const [user, setUser] = useState<any>(null);
   const [forceChangePassword, setForceChangePassword] = useState(false);
 
   const [cfgChecked, setCfgChecked] = useState(false);
   const [needsBusinessSetup, setNeedsBusinessSetup] = useState(false);
+
+  useEffect(() => {
+    const splashTimer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2000);
+
+    return () => clearTimeout(splashTimer);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -40,19 +51,24 @@ function App() {
       setForceChangePassword(true);
       return;
     }
+
     setSessionUser(u);
     setUser(u);
   };
 
-  if (!cfgChecked) return null;
+  if (showSplash) {
+    return <SplashScreen />;
+  }
+
+  if (!cfgChecked) {
+    return null;
+  }
 
   return (
     <HashRouter>
-      {/* ✅ Obligatorio antes de usar la app */}
       {needsBusinessSetup ? (
         <BusinessSetup
           onDone={() => {
-            // en dev, no reinicia; entonces marcamos como listo
             setNeedsBusinessSetup(false);
           }}
         />
