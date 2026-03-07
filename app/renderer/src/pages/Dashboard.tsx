@@ -54,9 +54,10 @@ export const Dashboard = () => {
   const [cashStatus, setCashStatus] = useState<any>(null);
   const [sales7, setSales7] = useState<any[]>([]);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
+
     try {
       const [tRaw, s7Raw, cash] = await Promise.all([
         todaySummary(),
@@ -71,7 +72,7 @@ export const Dashboard = () => {
       const totalExpenses = Number(t.total_expenses ?? t.expenses ?? 0);
       const totalCosts = Number(t.total_costs ?? t.costs ?? 0);
       const totalReturns = Number(t.total_returns ?? t.returns ?? 0);
-      const netSales = Number(t.net_sales ?? (totalSales - totalReturns));
+      const netSales = Number(t.net_sales ?? totalSales - totalReturns);
 
       setToday({
         total_sales: totalSales,
@@ -87,14 +88,18 @@ export const Dashboard = () => {
     } catch (e: any) {
       setError(e?.message || 'No se pudo cargar el dashboard');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    void load();
-    const timer = setInterval(() => void load(), 10000);
-    return () => clearInterval(timer);
+    void load(false);
+
+    const timer = window.setInterval(() => {
+      void load(true);
+    }, 10000);
+
+    return () => window.clearInterval(timer);
   }, []);
 
   const sales7Arr = useMemo(() => asArray(sales7), [sales7]);
