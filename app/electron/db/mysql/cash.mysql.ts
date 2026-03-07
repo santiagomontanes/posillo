@@ -66,8 +66,17 @@ export const getOpenSuggestionMySql = async (): Promise<any> => {
     };
   }
 
+  const suggestedOpeningCash =
+    last.counted_cash != null
+      ? Number(last.counted_cash)
+      : last.expected_cash != null
+      ? Number(last.expected_cash)
+      : last.opening_cash != null
+      ? Number(last.opening_cash)
+      : null;
+
   return {
-    suggestedOpeningCash: last.counted_cash ?? null,
+    suggestedOpeningCash,
     lastClosedAt: last.closed_at ?? null,
   };
 };

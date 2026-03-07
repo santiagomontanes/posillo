@@ -13,7 +13,8 @@ const money = (n: number): string => {
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
-const localYmd = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const localYmd = (d = new Date()) =>
+  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 export const DailyClose = ({ user }: { user: any }) => {
   const [date, setDate] = useState(localYmd(new Date()));
@@ -28,6 +29,7 @@ export const DailyClose = ({ user }: { user: any }) => {
   const load = async () => {
     setLoading(true);
     setError('');
+
     try {
       const res = await reportDailyClose(from, to);
       setData(res);
@@ -41,7 +43,6 @@ export const DailyClose = ({ user }: { user: any }) => {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
   useEffect(() => {
@@ -56,26 +57,33 @@ export const DailyClose = ({ user }: { user: any }) => {
   }, []);
 
   const totalsByMethod: Record<string, number> = data?.totalsByMethod ?? {};
+
   const totalSales = Number(data?.totalSales ?? 0);
+  const totalReturns = Number(data?.totalReturns ?? 0);
+  const netSales = Number(data?.netSales ?? (totalSales - totalReturns));
+
   const profit = Number(data?.profit ?? 0);
   const totalExpenses = Number(data?.totalExpenses ?? 0);
-  const net = Number(data?.net ?? profit - totalExpenses);
 
-  const onExport = async () => {
-    const html = buildDailyCloseHtml({
-      businessName: bizName || 'Sistetecni POS',
-      from,
-      to,
-      cashierName: user?.name || user?.email || '',
-      totalSales,
-      profit,
-      totalExpenses,
-      net,
-      totalsByMethod,
-    });
+  const net = Number(data?.net ?? netSales - totalExpenses);
 
-    await printInvoice(html);
-  };
+const onExport = async () => {
+  const html = buildDailyCloseHtml({
+    businessName: bizName || 'Sistetecni POS',
+    from,
+    to,
+    cashierName: user?.name || user?.email || '',
+    totalSales,
+    totalReturns,
+    netSales,
+    profit,
+    totalExpenses,
+    net,
+    totalsByMethod,
+  });
+
+  await printInvoice(html);
+};
 
   return (
     <div className="dashboard">
@@ -84,7 +92,7 @@ export const DailyClose = ({ user }: { user: any }) => {
           <div className="dashboard__eyebrow">Cierre diario</div>
           <h2 className="dashboard__title">Resumen consolidado del día</h2>
           <p className="dashboard__text">
-            Consulta ventas, utilidad, gastos y neto del día, y exporta el comprobante en PDF.
+            Consulta ventas, devoluciones, utilidad, gastos y neto del día.
           </p>
         </div>
       </div>
@@ -101,7 +109,9 @@ export const DailyClose = ({ user }: { user: any }) => {
         >
           <div>
             <div className="dashboard__section-title">Seleccionar fecha</div>
-            <div className="dashboard__cash-value">Genera el cierre detallado por día.</div>
+            <div className="dashboard__cash-value">
+              Genera el cierre detallado por día.
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -128,9 +138,20 @@ export const DailyClose = ({ user }: { user: any }) => {
       </div>
 
       <div className="grid grid-2 dashboard__stats">
+
         <div className="card stat-card">
-          <div className="stat-card__label">Total ventas</div>
+          <div className="stat-card__label">Ventas brutas</div>
           <div className="stat-card__value">{money(totalSales)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Devoluciones</div>
+          <div className="stat-card__value">{money(totalReturns)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Ventas netas</div>
+          <div className="stat-card__value">{money(netSales)}</div>
         </div>
 
         <div className="card stat-card">
@@ -147,6 +168,7 @@ export const DailyClose = ({ user }: { user: any }) => {
           <div className="stat-card__label">Neto</div>
           <div className="stat-card__value">{money(net)}</div>
         </div>
+
       </div>
 
       <div className="card">
@@ -159,6 +181,7 @@ export const DailyClose = ({ user }: { user: any }) => {
               <th style={{ textAlign: 'right' }}>Total</th>
             </tr>
           </thead>
+
           <tbody>
             {Object.keys(totalsByMethod).length ? (
               Object.entries(totalsByMethod)
@@ -166,7 +189,9 @@ export const DailyClose = ({ user }: { user: any }) => {
                 .map(([k, v]) => (
                   <tr key={k}>
                     <td>{k}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 900 }}>{money(Number(v || 0))}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 900 }}>
+                      {money(Number(v || 0))}
+                    </td>
                   </tr>
                 ))
             ) : (

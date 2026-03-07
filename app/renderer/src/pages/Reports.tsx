@@ -38,6 +38,8 @@ export const Reports = () => {
   const [top, setTop] = useState<any[]>([]);
   const [sum, setSum] = useState<any>({
     total_sales: 0,
+    total_returns: 0,
+    net_sales: 0,
     total_costs: 0,
     total_expenses: 0,
     utility: 0,
@@ -50,6 +52,7 @@ export const Reports = () => {
   useEffect(() => {
     void (async () => {
       setError('');
+
       try {
         const [dRaw, tRaw, sRaw] = await Promise.all([
           salesByDay(from, to),
@@ -62,23 +65,36 @@ export const Reports = () => {
         const s = asObject(sRaw);
 
         const totalSales = Number(s.total_sales ?? s.total ?? 0);
+        const totalReturns = Number(s.total_returns ?? s.returns ?? 0);
+        const netSales = Number(s.net_sales ?? (totalSales - totalReturns));
         const totalCosts = Number(s.total_costs ?? s.costs ?? 0);
         const totalExpenses = Number(s.total_expenses ?? s.expenses ?? 0);
 
         setData(d);
         setTop(t);
+
         setSum({
-          ...s,
           total_sales: totalSales,
+          total_returns: totalReturns,
+          net_sales: netSales,
           total_costs: totalCosts,
           total_expenses: totalExpenses,
-          utility: totalSales - totalCosts - totalExpenses,
+          utility: netSales - totalCosts - totalExpenses,
         });
+
       } catch (e: any) {
         setError(e?.message || 'No se pudieron cargar los reportes');
         setData([]);
         setTop([]);
-        setSum({ total_sales: 0, total_costs: 0, total_expenses: 0, utility: 0 });
+
+        setSum({
+          total_sales: 0,
+          total_returns: 0,
+          net_sales: 0,
+          total_costs: 0,
+          total_expenses: 0,
+          utility: 0,
+        });
       }
     })();
   }, [from, to]);
@@ -100,7 +116,7 @@ export const Reports = () => {
           <div className="dashboard__eyebrow">Reportes</div>
           <h2 className="dashboard__title">Análisis de ventas y rendimiento</h2>
           <p className="dashboard__text">
-            Consulta el comportamiento comercial del negocio y detecta tendencias de ventas.
+            Consulta ventas, devoluciones, gastos y utilidad del período.
           </p>
         </div>
       </div>
@@ -108,33 +124,51 @@ export const Reports = () => {
       {error && <div className="card">Error: {error}</div>}
 
       <div className="grid grid-2 dashboard__stats">
+
         <div className="card stat-card">
-          <div className="stat-card__label">Ventas del período</div>
-          <div className="stat-card__value">{money(sum.total_sales ?? 0)}</div>
+          <div className="stat-card__label">Ventas brutas</div>
+          <div className="stat-card__value">{money(sum.total_sales)}</div>
         </div>
 
         <div className="card stat-card">
-          <div className="stat-card__label">Gastos del período</div>
-          <div className="stat-card__value">{money(sum.total_expenses ?? 0)}</div>
+          <div className="stat-card__label">Devoluciones</div>
+          <div className="stat-card__value">{money(sum.total_returns)}</div>
         </div>
 
         <div className="card stat-card">
-          <div className="stat-card__label">Costos del período</div>
-          <div className="stat-card__value">{money(sum.total_costs ?? 0)}</div>
+          <div className="stat-card__label">Ventas netas</div>
+          <div className="stat-card__value">{money(sum.net_sales)}</div>
         </div>
 
         <div className="card stat-card">
-          <div className="stat-card__label">Utilidad estimada</div>
-          <div className="stat-card__value">{money(sum.utility ?? 0)}</div>
+          <div className="stat-card__label">Gastos</div>
+          <div className="stat-card__value">{money(sum.total_expenses)}</div>
         </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Costos</div>
+          <div className="stat-card__value">{money(sum.total_costs)}</div>
+        </div>
+
+        <div className="card stat-card">
+          <div className="stat-card__label">Utilidad</div>
+          <div className="stat-card__value">{money(sum.utility)}</div>
+        </div>
+
       </div>
 
       <div className="card dashboard__chart-card">
         <div className="dashboard__section-title">Ventas por día</div>
+
         <Bar
           data={{
             labels,
-            datasets: [{ label: 'Ventas', data: totals }],
+            datasets: [
+              {
+                label: 'Ventas',
+                data: totals,
+              },
+            ],
           }}
           options={{
             responsive: true,
@@ -157,12 +191,15 @@ export const Reports = () => {
             },
           }}
         />
+
       </div>
 
       <div className="card">
         <div className="dashboard__section-title">Top productos</div>
 
-        {asArray(top).length === 0 && <div style={{ opacity: 0.8 }}>Sin datos.</div>}
+        {asArray(top).length === 0 && (
+          <div style={{ opacity: 0.8 }}>Sin datos.</div>
+        )}
 
         <div style={{ display: 'grid', gap: 10 }}>
           {asArray(top).map((t: any, i: number) => (
@@ -178,8 +215,13 @@ export const Reports = () => {
                 border: '1px solid rgba(255,255,255,.06)',
               }}
             >
-              <span style={{ fontWeight: 700 }}>{String(t?.name ?? '')}</span>
-              <span style={{ color: 'var(--muted)' }}>{Number(t?.qty ?? 0)} vendidos</span>
+              <span style={{ fontWeight: 700 }}>
+                {String(t?.name ?? '')}
+              </span>
+
+              <span style={{ color: 'var(--muted)' }}>
+                {Number(t?.qty ?? 0)} vendidos
+              </span>
             </div>
           ))}
         </div>

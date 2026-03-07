@@ -4,15 +4,12 @@ import { getAuthContext } from '../services/session';
 
 function fmtDate(v: any): string {
   if (!v) return '';
-  // Si ya es Date
   if (v instanceof Date) return v.toLocaleString('es-CO');
 
-  // Si viene como string ISO / datetime
   const s = String(v);
   const d = new Date(s);
   if (!isNaN(d.getTime())) return d.toLocaleString('es-CO');
 
-  // fallback
   return s;
 }
 
@@ -21,8 +18,8 @@ function fmtText(v: any): string {
   if (typeof v === 'string') return v;
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
 
-  // objetos (incluye Date, JSON, etc.)
   if (v instanceof Date) return v.toLocaleString('es-CO');
+
   try {
     return JSON.stringify(v);
   } catch {
@@ -32,21 +29,20 @@ function fmtText(v: any): string {
 
 function fmtMetadata(v: any): string {
   if (!v) return '';
-  // Si viene como string JSON desde MySQL (a veces mysql2 devuelve string)
+
   if (typeof v === 'string') {
     const s = v.trim();
     if (!s) return '';
     try {
       const parsed = JSON.parse(s);
-      return JSON.stringify(parsed, null, 0);
+      return JSON.stringify(parsed, null, 2);
     } catch {
       return s;
     }
   }
 
-  // Si viene como objeto
   try {
-    return JSON.stringify(v);
+    return JSON.stringify(v, null, 2);
   } catch {
     return String(v);
   }
@@ -61,6 +57,7 @@ export const Audit = () => {
   const [action, setAction] = useState<string>('');
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string>('');
 
   const refresh = async (): Promise<void> => {
     setLoading(true);
@@ -76,6 +73,9 @@ export const Audit = () => {
       });
 
       setRows(Array.isArray(list) ? list : []);
+    } catch (e: any) {
+      console.error('[audit.refresh]', e);
+      setRows([]);
     } finally {
       setLoading(false);
     }
@@ -83,7 +83,6 @@ export const Audit = () => {
 
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const actionsInData = useMemo(() => {
@@ -93,109 +92,221 @@ export const Audit = () => {
   }, [rows]);
 
   const actorsInData = useMemo(() => {
-    const set = new Map<string, string>();
+    const map = new Map<string, string>();
+
     for (const r of rows) {
       const id = String(r.actor_user_id ?? r.actorId ?? '');
       if (!id) continue;
-      const name = String(r.actor_name ?? r.actorName ?? r.actor_email ?? r.actorEmail ?? id);
-      set.set(id, name);
+
+      const name = String(
+        r.actor_name ??
+          r.actorName ??
+          r.actor_email ??
+          r.actorEmail ??
+          id,
+      );
+
+      map.set(id, name);
     }
-    return Array.from(set.entries()).map(([id, name]) => ({ id, name }));
+
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [rows]);
 
   return (
-    <div className="card">
-      <h3>Auditoría</h3>
-
-      <div className="grid grid-2">
-        <label>
-          Desde:
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          Hasta:
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
+    <div className="dashboard">
+      <div className="card dashboard__hero">
+        <div>
+          <div className="dashboard__eyebrow">Auditoría</div>
+          <h2 className="dashboard__title">Historial de movimientos del sistema</h2>
+          <p className="dashboard__text">
+            Consulta quién hizo cambios, cuándo los hizo y sobre qué entidad del sistema.
+          </p>
+        </div>
       </div>
 
-      <div className="grid grid-2" style={{ marginTop: 8 }}>
-        <label>
-          Usuario:
-          <select value={actorId} onChange={(e) => setActorId(e.target.value)}>
-            <option value="">Todos</option>
-            {actorsInData.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="card">
+        <div className="dashboard__section-title">Filtros</div>
 
-        <label>
-          Acción:
-          <select value={action} onChange={(e) => setAction(e.target.value)}>
-            <option value="">Todas</option>
-            {actionsInData.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+        <div className="grid grid-2">
+          <label style={{ display: 'grid', gap: 8 }}>
+            <span style={{ color: 'var(--muted)', fontWeight: 700 }}>Desde</span>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </label>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <button onClick={() => void refresh()} disabled={loading}>
-          {loading ? 'Cargando...' : 'Filtrar'}
-        </button>
+          <label style={{ display: 'grid', gap: 8 }}>
+            <span style={{ color: 'var(--muted)', fontWeight: 700 }}>Hasta</span>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </label>
+        </div>
+
+        <div className="grid grid-2" style={{ marginTop: 10 }}>
+          <label style={{ display: 'grid', gap: 8 }}>
+            <span style={{ color: 'var(--muted)', fontWeight: 700 }}>Usuario</span>
+            <select value={actorId} onChange={(e) => setActorId(e.target.value)}>
+              <option value="">Todos</option>
+              {actorsInData.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={{ display: 'grid', gap: 8 }}>
+            <span style={{ color: 'var(--muted)', fontWeight: 700 }}>Acción</span>
+            <select value={action} onChange={(e) => setAction(e.target.value)}>
+              <option value="">Todas</option>
+              {actionsInData.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+          <button onClick={() => void refresh()} disabled={loading}>
+            {loading ? 'Cargando...' : 'Filtrar'}
+          </button>
+
+          <button
+            className="btn btn--ghost"
+            onClick={() => {
+              setFrom(today);
+              setTo(today);
+              setActorId('');
+              setAction('');
+              setExpandedId('');
+            }}
+            disabled={loading}
+          >
+            Limpiar filtros
+          </button>
+        </div>
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 12,
+            alignItems: 'center',
+            marginBottom: 10,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div className="dashboard__section-title">Registros encontrados</div>
+          <div style={{ opacity: 0.8 }}>Total: {rows.length}</div>
+        </div>
+
         <div style={{ overflowX: 'auto' }}>
           <table className="table" style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>CREATED_AT</th>
-                <th>ACTOR</th>
-                <th>ACTION</th>
-                <th>ENTITY_TYPE</th>
-                <th>ENTITY_ID</th>
-                <th>METADATA</th>
+                <th>Fecha</th>
+                <th>Actor</th>
+                <th>Acción</th>
+                <th>Entidad</th>
+                <th>ID entidad</th>
+                <th>Detalle</th>
               </tr>
             </thead>
+
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ opacity: 0.8 }}>
-                    Sin registros (o filtro muy estricto)
+                  <td colSpan={6} style={{ opacity: 0.8, padding: 14 }}>
+                    Sin registros para mostrar.
                   </td>
                 </tr>
               ) : (
-                rows.map((r) => (
-                  <tr key={String(r.id ?? `${r.action}-${r.created_at}-${Math.random()}`)}>
-                    {/* ✅ nunca renderizar Date/objeto directo */}
-                    <td>{fmtDate(r.created_at ?? r.createdAt)}</td>
+                rows.map((r) => {
+                  const rowId = String(
+                    r.id ?? `${r.action}-${r.created_at}-${r.entity_id ?? ''}`,
+                  );
 
-                    <td>{fmtText(r.actor_name ?? r.actorName ?? r.actor_email ?? r.actorEmail ?? r.actor_user_id ?? r.actorId)}</td>
+                  const expanded = expandedId === rowId;
+                  const metadataText = fmtMetadata(r.metadata);
 
-                    <td>{fmtText(r.action)}</td>
+                  return (
+                    <>
+                      <tr key={rowId}>
+                        <td>{fmtDate(r.created_at ?? r.createdAt)}</td>
 
-                    <td>{fmtText(r.entity_type ?? r.entityType)}</td>
+                        <td>
+                          {fmtText(
+                            r.actor_name ??
+                              r.actorName ??
+                              r.actor_email ??
+                              r.actorEmail ??
+                              r.actor_user_id ??
+                              r.actorId,
+                          )}
+                        </td>
 
-                    <td>{fmtText(r.entity_id ?? r.entityId)}</td>
+                        <td>{fmtText(r.action)}</td>
+                        <td>{fmtText(r.entity_type ?? r.entityType)}</td>
+                        <td>{fmtText(r.entity_id ?? r.entityId)}</td>
 
-                    <td style={{ maxWidth: 420, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {fmtMetadata(r.metadata)}
-                    </td>
-                  </tr>
-                ))
+                        <td>
+                          <button
+                            className="btn btn--ghost"
+                            onClick={() =>
+                              setExpandedId(expanded ? '' : rowId)
+                            }
+                          >
+                            {expanded ? 'Ocultar' : 'Ver'}
+                          </button>
+                        </td>
+                      </tr>
+
+                      {expanded && (
+                        <tr key={`${rowId}-detail`}>
+                          <td colSpan={6} style={{ padding: 0 }}>
+                            <div
+                              style={{
+                                margin: '8px 0 14px 0',
+                                padding: 14,
+                                borderRadius: 14,
+                                background: 'rgba(255,255,255,.03)',
+                                border: '1px solid rgba(255,255,255,.06)',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontWeight: 800,
+                                  marginBottom: 10,
+                                  color: 'var(--muted)',
+                                }}
+                              >
+                                Metadata
+                              </div>
+
+                              <pre
+                                style={{
+                                  margin: 0,
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word',
+                                  fontSize: 12,
+                                  lineHeight: 1.5,
+                                  fontFamily:
+                                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                                }}
+                              >
+                                {metadataText || 'Sin metadata'}
+                              </pre>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })
               )}
             </tbody>
           </table>
-        </div>
-
-        <div style={{ marginTop: 8, opacity: 0.8 }}>
-          Total: {rows.length}
         </div>
       </div>
     </div>

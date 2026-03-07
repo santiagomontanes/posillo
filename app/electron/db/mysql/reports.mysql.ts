@@ -3,16 +3,13 @@ import { mysqlQueryAll } from '../mysql';
 
 // -------------------- Helpers --------------------
 
-// Toma "YYYY-MM-DD" de cualquier string (ISO, datetime, etc.)
 const ymd = (s: string) => String(s ?? '').trim().slice(0, 10);
 
-// Fecha local "YYYY-MM-DD" (evita líos de UTC)
 const localYmd = (d = new Date()): string => {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-// Normaliza números que vienen como string/decimal/etc.
 const num = (v: any): number => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -45,13 +42,16 @@ export const reportTopProductsMySql = async (from: string, to: string): Promise<
          NULLIF(TRIM(CONCAT(IFNULL(p.brand,''),' ',IFNULL(p.model,''))), ''),
          'Producto'
        ) AS name,
-       COALESCE(SUM(si.qty),0) AS qty
+       COALESCE(SUM(si.qty),0) - COALESCE(SUM(sri.qty),0) AS qty
      FROM sale_items si
      JOIN sales s ON s.id = si.sale_id
      LEFT JOIN products p ON p.id = si.product_id
+     LEFT JOIN sale_return_items sri ON sri.sale_item_id = si.id
+     LEFT JOIN sale_returns sr ON sr.id = sri.return_id
      WHERE LEFT(s.date,10) BETWEEN ? AND ?
        AND si.product_id IS NOT NULL
      GROUP BY si.product_id, name
+     HAVING qty > 0
      ORDER BY qty DESC
      LIMIT 10`,
     [f, t],
@@ -64,79 +64,164 @@ export const reportSummaryMySql = async (from: string, to: string): Promise<any>
 
   const rows = await mysqlQueryAll<any>(
     `SELECT
+       /* ventas brutas */
        (SELECT COALESCE(SUM(total),0)
           FROM sales
          WHERE LEFT(date,10) BETWEEN ? AND ?
        ) as total_sales,
 
+       /* devoluciones */
+       (SELECT COALESCE(SUM(sr.total_returned),0)
+          FROM sale_returns sr
+         WHERE LEFT(sr.created_at,10) BETWEEN ? AND ?
+       ) as total_returns,
+
+       /* gastos */
        (SELECT COALESCE(SUM(amount),0)
           FROM expenses
          WHERE LEFT(date,10) BETWEEN ? AND ?
        ) as total_expenses,
 
+       /* costo bruto vendido */
        (SELECT COALESCE(SUM(si.qty * COALESCE(si.unit_cost, p.purchase_price, 0)),0)
           FROM sale_items si
           JOIN sales s ON s.id = si.sale_id
           LEFT JOIN products p ON p.id = si.product_id
          WHERE LEFT(s.date,10) BETWEEN ? AND ?
-       ) as total_costs`,
-    [f, t, f, t, f, t],
+       ) as gross_costs,
+
+       /* costo devuelto */
+       (SELECT COALESCE(SUM(sri.qty * COALESCE(si.unit_cost, p.purchase_price, 0)),0)
+          FROM sale_return_items sri
+          JOIN sale_returns sr ON sr.id = sri.return_id
+          JOIN sale_items si ON si.id = sri.sale_item_id
+          LEFT JOIN products p ON p.id = sri.product_id
+         WHERE LEFT(sr.created_at,10) BETWEEN ? AND ?
+       ) as returned_costs`,
+    [f, t, f, t, f, t, f, t, f, t],
   );
 
-  const r = rows?.[0] ?? { total_sales: 0, total_expenses: 0, total_costs: 0 };
+  const r = rows?.[0] ?? {
+    total_sales: 0,
+    total_returns: 0,
+    total_expenses: 0,
+    gross_costs: 0,
+    returned_costs: 0,
+  };
+
+  const totalSales = num(r.total_sales);
+  const totalReturns = num(r.total_returns);
+  const totalExpenses = num(r.total_expenses);
+  const grossCosts = num(r.gross_costs);
+  const returnedCosts = num(r.returned_costs);
+
+  const netSales = totalSales - totalReturns;
+  const totalCosts = grossCosts - returnedCosts;
+  const utility = netSales - totalCosts - totalExpenses;
 
   return {
-    total_sales: num(r.total_sales),
-    total_expenses: num(r.total_expenses),
-    total_costs: num(r.total_costs),
+    total_sales: totalSales,
+    total_returns: totalReturns,
+    net_sales: netSales,
+    total_expenses: totalExpenses,
+    total_costs: totalCosts,
+    utility,
   };
 };
 
 export const getTodaySummaryMySql = async (): Promise<any> => {
-  // ✅ Local (no UTC)
   const today = localYmd(new Date());
 
   const rows = await mysqlQueryAll<any>(
     `SELECT
+       /* ventas brutas */
        (SELECT COALESCE(SUM(total),0)
           FROM sales
          WHERE LEFT(date,10) = ?
        ) as total_sales,
 
+       /* ventas en efectivo */
        (SELECT COALESCE(SUM(total),0)
           FROM sales
          WHERE LEFT(date,10) = ?
-           AND payment_method = 'EFECTIVO'
+           AND UPPER(TRIM(payment_method)) = 'EFECTIVO'
        ) as cash_sales,
 
+       /* devoluciones */
+       (SELECT COALESCE(SUM(sr.total_returned),0)
+          FROM sale_returns sr
+         WHERE LEFT(sr.created_at,10) = ?
+       ) as total_returns,
+
+       /* devoluciones en efectivo */
+       (SELECT COALESCE(SUM(sr.total_returned),0)
+          FROM sale_returns sr
+          JOIN sales s ON s.id = sr.sale_id
+         WHERE LEFT(sr.created_at,10) = ?
+           AND UPPER(TRIM(s.payment_method)) = 'EFECTIVO'
+       ) as cash_returns,
+
+       /* gastos */
        (SELECT COALESCE(SUM(amount),0)
           FROM expenses
          WHERE LEFT(date,10) = ?
        ) as total_expenses,
 
+       /* costo bruto vendido */
        (SELECT COALESCE(SUM(si.qty * COALESCE(si.unit_cost, p.purchase_price, 0)),0)
           FROM sale_items si
           JOIN sales s ON s.id = si.sale_id
           LEFT JOIN products p ON p.id = si.product_id
          WHERE LEFT(s.date,10) = ?
-       ) as total_costs`,
-    [today, today, today, today],
+       ) as gross_costs,
+
+       /* costo devuelto */
+       (SELECT COALESCE(SUM(sri.qty * COALESCE(si.unit_cost, p.purchase_price, 0)),0)
+          FROM sale_return_items sri
+          JOIN sale_returns sr ON sr.id = sri.return_id
+          JOIN sale_items si ON si.id = sri.sale_item_id
+          LEFT JOIN products p ON p.id = sri.product_id
+         WHERE LEFT(sr.created_at,10) = ?
+       ) as returned_costs`,
+    [today, today, today, today, today, today, today],
   );
 
-  const r =
-    rows?.[0] ?? { total_sales: 0, cash_sales: 0, total_expenses: 0, total_costs: 0 };
+  const r = rows?.[0] ?? {
+    total_sales: 0,
+    cash_sales: 0,
+    total_returns: 0,
+    cash_returns: 0,
+    total_expenses: 0,
+    gross_costs: 0,
+    returned_costs: 0,
+  };
+
+  const totalSales = num(r.total_sales);
+  const cashSales = num(r.cash_sales);
+  const totalReturns = num(r.total_returns);
+  const cashReturns = num(r.cash_returns);
+  const totalExpenses = num(r.total_expenses);
+  const grossCosts = num(r.gross_costs);
+  const returnedCosts = num(r.returned_costs);
+
+  const netSales = totalSales - totalReturns;
+  const totalCosts = grossCosts - returnedCosts;
+  const utility = netSales - totalCosts - totalExpenses;
 
   return {
     day: today,
-    total_sales: num(r.total_sales),
-    cash_sales: num(r.cash_sales),
-    total_expenses: num(r.total_expenses),
-    total_costs: num(r.total_costs),
+    total_sales: totalSales,
+    cash_sales: cashSales,
+    total_returns: totalReturns,
+    cash_returns: cashReturns,
+    net_sales: netSales,
+    total_expenses: totalExpenses,
+    total_costs: totalCosts,
+    utility,
   };
 };
 
 export const getLast7DaysSalesMySql = async (): Promise<any[]> => {
-  // ✅ Local (no UTC)
   const now = new Date();
   const to = localYmd(now);
 
@@ -154,12 +239,10 @@ export const getLast7DaysSalesMySql = async (): Promise<any[]> => {
   );
 };
 
-// ✅ Cierre diario con gastos + neto (y fecha en formato tuyo)
 export const reportDailyCloseMySql = async (from: string, to: string) => {
   const f = ymd(from);
   const t = ymd(to);
 
-  // 1) Ventas por método
   const rows = await mysqlQueryAll<{ payment_method: string; total: any }>(
     `SELECT payment_method, COALESCE(SUM(total),0) as total
      FROM sales
@@ -178,8 +261,15 @@ export const reportDailyCloseMySql = async (from: string, to: string) => {
     totalSales += v;
   }
 
-  // 2) Utilidad (solo items con product_id)
-  const profitRows = await mysqlQueryAll<{ profit: any }>(
+  const returnRows = await mysqlQueryAll<{ total_returns: any }>(
+    `SELECT COALESCE(SUM(sr.total_returned),0) as total_returns
+     FROM sale_returns sr
+     WHERE LEFT(sr.created_at,10) BETWEEN ? AND ?`,
+    [f, t],
+  );
+  const totalReturns = num((returnRows?.[0] as any)?.total_returns);
+
+  const grossProfitRows = await mysqlQueryAll<{ profit: any }>(
     `SELECT COALESCE(SUM(si.line_total - (COALESCE(si.unit_cost,0) * si.qty)),0) as profit
      FROM sale_items si
      JOIN sales s ON s.id = si.sale_id
@@ -187,9 +277,19 @@ export const reportDailyCloseMySql = async (from: string, to: string) => {
        AND si.product_id IS NOT NULL`,
     [f, t],
   );
-  const profit = num((profitRows?.[0] as any)?.profit);
+  const grossProfit = num((grossProfitRows?.[0] as any)?.profit);
 
-  // 3) Gastos
+  const returnedProfitRows = await mysqlQueryAll<{ returned_profit: any }>(
+    `SELECT COALESCE(SUM(sri.line_total - (COALESCE(si.unit_cost,0) * sri.qty)),0) as returned_profit
+     FROM sale_return_items sri
+     JOIN sale_returns sr ON sr.id = sri.return_id
+     JOIN sale_items si ON si.id = sri.sale_item_id
+     WHERE LEFT(sr.created_at,10) BETWEEN ? AND ?
+       AND sri.product_id IS NOT NULL`,
+    [f, t],
+  );
+  const returnedProfit = num((returnedProfitRows?.[0] as any)?.returned_profit);
+
   const expRows = await mysqlQueryAll<{ total_expenses: any }>(
     `SELECT COALESCE(SUM(amount),0) as total_expenses
      FROM expenses
@@ -198,22 +298,19 @@ export const reportDailyCloseMySql = async (from: string, to: string) => {
   );
   const totalExpenses = num((expRows?.[0] as any)?.total_expenses);
 
-  // 4) Neto
+  const netSales = totalSales - totalReturns;
+  const profit = grossProfit - returnedProfit;
   const net = profit - totalExpenses;
-
-  // 5) Extra útil: ventas en efectivo (para “dinero esperado”)
   const cashSales = num(totalsByMethod['EFECTIVO'] ?? 0);
 
   return {
     from: f,
     to: t,
-
-    // ventas
     totalSales,
+    totalReturns,
+    netSales,
     cashSales,
     totalsByMethod,
-
-    // resultados
     profit,
     totalExpenses,
     net,
