@@ -16,7 +16,6 @@ import { registerAuditIpc } from './ipc/audit.ipc';
 import { registerMySqlIpc } from './ipc/mysql.ipc';
 import { registerConfigIpc } from './ipc/config.ipc';
 import { registerCashDrawerIpc } from './ipc/cashdrawer.ipc';
-
 import {
   activateOnline,
   checkOnline,
@@ -24,6 +23,8 @@ import {
   getSavedLicenseKey,
   licenseStatusLocal,
 } from './license/license';
+import { registerInstallerIpc }  from './ipc/installer.ipc';
+import { registerAutoDetectIpc } from './ipc/autodetect.ipc';
 
 console.log('[MAIN] Electron arrancó desde:', __filename);
 
@@ -81,6 +82,8 @@ ipcMain.handle('license:check-online', async () => {
 // -------------------- APP READY --------------------
 
 app.whenReady().then(async () => {
+  registerAutoDetectIpc();
+  registerInstallerIpc();
   registerMySqlIpc();
   registerCashDrawerIpc();
 

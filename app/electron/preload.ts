@@ -1,6 +1,20 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('api', {
+  
+  installer: {
+  testConnection: (cfg: any)     => ipcRenderer.invoke('installer:test-connection', cfg),
+  check:          ()             => ipcRenderer.invoke('installer:check'),
+  run:            (payload: any) => ipcRenderer.invoke('installer:run', payload),
+  },
+autodetect: {
+  status: () => ipcRenderer.invoke('autodetect:status'),
+  reset:  () => ipcRenderer.invoke('autodetect:reset'),
+  },
+on: (channel: string, cb: (...args: any[]) => void) => {
+  ipcRenderer.on(channel, (_event, ...args) => cb(...args));
+  return () => ipcRenderer.removeAllListeners(channel);
+  },
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (cfg: any) => ipcRenderer.invoke('config:set', cfg),
