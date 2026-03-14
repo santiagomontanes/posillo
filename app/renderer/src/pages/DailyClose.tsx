@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { reportDailyClose } from '../services/reports';
-import { printInvoice } from '../services/sales';
 import { buildDailyCloseHtml } from '../reports/dailyCloseTemplate';
 import { getConfig } from '../services/config';
 
@@ -15,6 +14,85 @@ const money = (n: number): string => {
 const pad = (n: number) => String(n).padStart(2, '0');
 const localYmd = (d = new Date()) =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+function openHtmlDocument(title: string, html: string): void {
+  const w = window.open('', '_blank', 'width=1000,height=800');
+  if (!w) {
+    alert('No se pudo abrir la vista previa del documento.');
+    return;
+  }
+
+  w.document.open();
+  w.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${title}</title>
+        <style>
+          body {
+            margin: 0;
+            background: #f3f4f6;
+            font-family: Arial, sans-serif;
+          }
+          .toolbar {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: #111827;
+            color: white;
+            padding: 12px 16px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+          }
+          .toolbar button {
+            border: 0;
+            border-radius: 10px;
+            padding: 10px 14px;
+            cursor: pointer;
+            font-weight: 700;
+          }
+          .toolbar .primary {
+            background: #2563eb;
+            color: white;
+          }
+          .toolbar .ghost {
+            background: #374151;
+            color: white;
+          }
+          .sheet {
+            max-width: 900px;
+            margin: 20px auto;
+            background: white;
+            box-shadow: 0 10px 30px rgba(0,0,0,.12);
+          }
+          @media print {
+            .toolbar { display: none !important; }
+            body { background: white; }
+            .sheet {
+              box-shadow: none;
+              max-width: 100%;
+              margin: 0;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="toolbar">
+          <div>${title}</div>
+          <div style="display:flex; gap:10px;">
+            <button class="primary" onclick="window.print()">Imprimir / Guardar PDF</button>
+            <button class="ghost" onclick="window.close()">Cerrar</button>
+          </div>
+        </div>
+        <div class="sheet">${html}</div>
+      </body>
+    </html>
+  `);
+  w.document.close();
+}
 
 export const DailyClose = ({ user }: { user: any }) => {
   const [date, setDate] = useState(localYmd(new Date()));
@@ -64,26 +142,25 @@ export const DailyClose = ({ user }: { user: any }) => {
 
   const profit = Number(data?.profit ?? 0);
   const totalExpenses = Number(data?.totalExpenses ?? 0);
-
   const net = Number(data?.net ?? netSales - totalExpenses);
 
-const onExport = async () => {
-  const html = buildDailyCloseHtml({
-    businessName: bizName || 'Sistetecni POS',
-    from,
-    to,
-    cashierName: user?.name || user?.email || '',
-    totalSales,
-    totalReturns,
-    netSales,
-    profit,
-    totalExpenses,
-    net,
-    totalsByMethod,
-  });
+  const onExport = async () => {
+    const html = buildDailyCloseHtml({
+      businessName: bizName || 'Sistetecni POS',
+      from,
+      to,
+      cashierName: user?.name || user?.email || '',
+      totalSales,
+      totalReturns,
+      netSales,
+      profit,
+      totalExpenses,
+      net,
+      totalsByMethod,
+    });
 
-  await printInvoice(html);
-};
+    openHtmlDocument(`Cierre diario ${from}`, html);
+  };
 
   return (
     <div className="dashboard">
@@ -138,7 +215,6 @@ const onExport = async () => {
       </div>
 
       <div className="grid grid-2 dashboard__stats">
-
         <div className="card stat-card">
           <div className="stat-card__label">Ventas brutas</div>
           <div className="stat-card__value">{money(totalSales)}</div>
@@ -168,7 +244,6 @@ const onExport = async () => {
           <div className="stat-card__label">Neto</div>
           <div className="stat-card__value">{money(net)}</div>
         </div>
-
       </div>
 
       <div className="card">

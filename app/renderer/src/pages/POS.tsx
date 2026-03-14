@@ -14,6 +14,7 @@ import {
 import { Modal } from '../ui/Modal';
 import { buildInvoiceHtml } from '../invoice/invoiceTemplate';
 import { getConfig } from '../services/config';
+import { ipc } from '../services/ipcClient';
 
 type CartItem = {
   cart_id: string;
@@ -61,6 +62,7 @@ export const POS = ({ user }: { user: any }) => {
   const [cashReceivedStr, setCashReceivedStr] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerId, setCustomerId] = useState('');
+  const [showCustomer, setShowCustomer] = useState(false);
 
   const [biz, setBiz] = useState<{ name?: string; logoDataUrl?: string }>({});
 
@@ -71,6 +73,20 @@ export const POS = ({ user }: { user: any }) => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [saleDetail, setSaleDetail] = useState<any | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  const [drawerBusy, setDrawerBusy] = useState(false);
+  const [drawerMode, setDrawerMode] = useState<'printer' | 'serial'>(
+    ((localStorage.getItem('cashdrawer_mode') as 'printer' | 'serial') || 'printer'),
+  );
+  const [drawerPort, setDrawerPort] = useState(localStorage.getItem('cashdrawer_port') || 'COM3');
+  const [drawerBaudRate, setDrawerBaudRate] = useState(
+    Number(localStorage.getItem('cashdrawer_baudrate') || '9600'),
+  );
+  const [drawerPrinterName, setDrawerPrinterName] = useState(
+    localStorage.getItem('cashdrawer_printer_name') || '',
+  );
+  const [drawerPorts, setDrawerPorts] = useState<any[]>([]);
+  const [drawerPrinters, setDrawerPrinters] = useState<any[]>([]);
 
   useEffect(() => {
     focusScanner();
@@ -92,33 +108,27 @@ export const POS = ({ user }: { user: any }) => {
   }, []);
 
   useEffect(() => {
-    const handleShortcut = async (e: KeyboardEvent) => {
-      if (e.key !== 'F6') return;
-
-      e.preventDefault();
-
+    (async () => {
       try {
-        const defaultPort = localStorage.getItem('cashdrawer_port') || 'COM3';
-        const defaultBaudRate = Number(localStorage.getItem('cashdrawer_baudrate') || '9600');
+        const ports = await ipc.cashdrawer.listPorts();
+        setDrawerPorts(Array.isArray(ports) ? ports : []);
 
-        const res = await (window as any).api.cashdrawer.open({
-          port: defaultPort,
-          baudRate: defaultBaudRate,
-        });
+        const printers = await ipc.cashdrawer.listPrinters();
+        setDrawerPrinters(Array.isArray(printers) ? printers : []);
 
-        if (!res?.ok) {
-          setMessage(res?.message || 'No se pudo abrir el cajón.');
-          return;
+        if (!localStorage.getItem('cashdrawer_printer_name') && Array.isArray(printers) && printers.length > 0) {
+          const preferred =
+            printers.find((p: any) => String(p?.name || '').toLowerCase().includes('ncr')) ||
+            printers.find((p: any) => String(p?.name || '').toLowerCase().includes('generic')) ||
+            printers[0];
+
+          if (preferred?.name) {
+            setDrawerPrinterName(preferred.name);
+            localStorage.setItem('cashdrawer_printer_name', preferred.name);
+          }
         }
-
-        setMessage(`Cajón abierto en ${res.port}`);
-      } catch (err: any) {
-        setMessage(err?.message || 'No se pudo abrir el cajón.');
-      }
-    };
-
-    window.addEventListener('keydown', handleShortcut);
-    return () => window.removeEventListener('keydown', handleShortcut);
+      } catch {}
+    })();
   }, []);
 
   const onRootClick = (e: React.MouseEvent) => {
@@ -330,7 +340,7 @@ export const POS = ({ user }: { user: any }) => {
     }
 
     try {
-      const res = await suspendSale({
+      await suspendSale({
         userId: user.id,
         items: cart.map((item) => ({
           product_id: item.product_id,
@@ -354,7 +364,7 @@ export const POS = ({ user }: { user: any }) => {
       clearCart();
       setCustomerName('');
       setCustomerId('');
-      setMessage(`Venta suspendida correctamente.`);
+      setMessage('Venta suspendida correctamente.');
       await loadSuspended();
       setSuspendedOpen(true);
     } catch (e: any) {
@@ -394,7 +404,7 @@ export const POS = ({ user }: { user: any }) => {
       await deleteSuspendedSale(id);
       await loadSuspended();
       setSuspendedOpen(false);
-      setMessage(`Venta reanudada correctamente.`);
+      setMessage('Venta reanudada correctamente.');
       focusScanner();
     } catch (e: any) {
       setMessage(e?.message || 'No se pudo reanudar la venta.');
@@ -467,6 +477,65 @@ export const POS = ({ user }: { user: any }) => {
     }
   };
 
+  const handleOpenDrawer = async () => {
+    if (drawerBusy) return;
+
+    setDrawerBusy(true);
+    setMessage('');
+
+    try {
+      localStorage.setItem('cashdrawer_mode', drawerMode);
+      localStorage.setItem('cashdrawer_port', drawerPort);
+      localStorage.setItem('cashdrawer_baudrate', String(drawerBaudRate));
+      localStorage.setItem('cashdrawer_printer_name', drawerPrinterName);
+
+      const payload =
+        drawerMode === 'serial'
+          ? {
+              mode: 'serial' as const,
+              port: drawerPort,
+              baudRate: drawerBaudRate,
+              commandHex: '1B700019FA',
+              timeoutMs: 5000,
+            }
+          : {
+              mode: 'printer' as const,
+              printerName: drawerPrinterName,
+              commandHex: '1B700019FA',
+              timeoutMs: 7000,
+            };
+
+      const res = await ipc.cashdrawer.open(payload);
+
+      if (!res?.ok) {
+        setMessage(res?.message || 'No se pudo abrir el cajón.');
+        return;
+      }
+
+      setMessage(
+        drawerMode === 'serial'
+          ? `Cajón abierto por ${res.port || drawerPort}`
+          : `Cajón abierto por impresora ${res.printerName || drawerPrinterName}`,
+      );
+    } catch (err: any) {
+      setMessage(err?.message || 'No se pudo abrir el cajón.');
+    } finally {
+      setDrawerBusy(false);
+      focusScanner();
+    }
+  };
+
+  useEffect(() => {
+    const handleShortcut = async (e: KeyboardEvent) => {
+      if (e.key !== 'F6') return;
+      e.preventDefault();
+      await handleOpenDrawer();
+    };
+
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [drawerBusy, drawerMode, drawerPort, drawerBaudRate, drawerPrinterName]);
+
   const confirm = async (): Promise<void> => {
     if (isProcessing) return;
     if (cart.length === 0) return setMessage('El carrito está vacío.');
@@ -525,12 +594,24 @@ export const POS = ({ user }: { user: any }) => {
         })),
       });
 
-      await printInvoice(html);
+      const shouldPrint = window.confirm('¿Deseas imprimir el tiquete?');
 
-      clearCart();
-      setCustomerName('');
-      setCustomerId('');
-      setMessage(`Venta realizada. Factura #${String(res.invoiceNumber ?? '')}`);
+if (shouldPrint) {
+  await printInvoice(html);
+}
+
+if (paymentMethod === 'EFECTIVO') {
+  await handleOpenDrawer();
+}
+
+clearCart();
+setCustomerName('');
+setCustomerId('');
+setMessage(
+  shouldPrint
+    ? `Venta realizada e impresa. Factura #${String(res.invoiceNumber ?? '')}`
+    : `Venta realizada sin impresión. Factura #${String(res.invoiceNumber ?? '')}`,
+);
     } catch (e: any) {
       setMessage(e?.message || 'No se pudo confirmar la venta.');
     } finally {
@@ -557,7 +638,7 @@ export const POS = ({ user }: { user: any }) => {
         }}
       />
 
-      <div className="card dashboard__hero">
+      {/*<div className="card dashboard__hero">
         <div>
           <div className="dashboard__eyebrow">Punto de venta</div>
           <h2 className="dashboard__title">Cobro rápido y control del carrito</h2>
@@ -565,7 +646,7 @@ export const POS = ({ user }: { user: any }) => {
             Busca productos, escanea códigos, agrega ítems libres y finaliza ventas con distintos métodos de pago.
           </p>
         </div>
-      </div>
+      </div>*/}
 
       <div className="pos">
         <section className="pos__left card">
@@ -693,18 +774,42 @@ export const POS = ({ user }: { user: any }) => {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
-            <input
-              placeholder="Nombre del cliente (opcional)"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-            />
-            <input
-              placeholder="Documento o identificación (opcional)"
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-            />
-          </div>
+          <div style={{ marginTop: 12 }}>
+  {!showCustomer && (
+    <button
+      className="btn btn--ghost"
+      onClick={() => setShowCustomer(true)}
+    >
+      Agregar datos del cliente
+    </button>
+  )}
+
+  {showCustomer && (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <input
+        placeholder="Nombre del cliente"
+        value={customerName}
+        onChange={(e) => setCustomerName(e.target.value)}
+      />
+      <input
+        placeholder="Documento o identificación"
+        value={customerId}
+        onChange={(e) => setCustomerId(e.target.value)}
+      />
+
+      <button
+        className="btn btn--ghost"
+        onClick={() => {
+          setShowCustomer(false);
+          setCustomerName('');
+          setCustomerId('');
+        }}
+          >
+        Quitar datos del cliente
+          </button>
+         </div>
+          )}
+    </div>
 
           <div className="pos__cart">
             {cart.map((i) => (
@@ -810,6 +915,8 @@ export const POS = ({ user }: { user: any }) => {
               </div>
             )}
 
+            
+
             {message && <div className="pos__msg">{message}</div>}
 
             <div className="pos__total">
@@ -817,9 +924,20 @@ export const POS = ({ user }: { user: any }) => {
               <div className="pos__total-amount">{money(total)}</div>
             </div>
 
-            <button className="pos__confirm" onClick={confirm} disabled={!canConfirm}>
-              {isProcessing ? 'Procesando...' : 'Cobrar'}
+            <button
+              className="pos__confirm"
+              style={{
+              fontSize: 22,
+              padding: "16px",
+              marginTop: 10
+                }}
+              onClick={confirm}
+              disabled={!canConfirm}
+              >
+              {isProcessing ? 'Procesando...' : '💰 COBRAR'}
             </button>
+
+            
 
             <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
               <button
@@ -829,6 +947,108 @@ export const POS = ({ user }: { user: any }) => {
               >
                 Suspender venta
               </button>
+
+              <div
+              style={{
+                marginTop: 14,
+                padding: 12,
+                borderRadius: 14,
+                border: '1px solid rgba(255,255,255,.08)',
+                background: 'rgba(255,255,255,.03)',
+                display: 'grid',
+                gap: 10,
+              }}
+            >
+              <div style={{ fontWeight: 900 }}>Cajón de dinero</div>
+
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button
+                  className={`chip ${drawerMode === 'printer' ? 'chip--active' : ''}`}
+                  onClick={() => {
+                    setDrawerMode('printer');
+                    localStorage.setItem('cashdrawer_mode', 'printer');
+                  }}
+                  disabled={drawerBusy}
+                >
+                  Por impresora
+                </button>
+
+                <button
+                  className={`chip ${drawerMode === 'serial' ? 'chip--active' : ''}`}
+                  onClick={() => {
+                    setDrawerMode('serial');
+                    localStorage.setItem('cashdrawer_mode', 'serial');
+                  }}
+                  disabled={drawerBusy}
+                >
+                  Por puerto COM
+                </button>
+              </div>
+
+              {drawerMode === 'printer' ? (
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <label style={{ fontSize: 13, opacity: 0.85 }}>Impresora que abrirá el cajón</label>
+                  <select
+                    value={drawerPrinterName}
+                    onChange={(e) => {
+                      setDrawerPrinterName(e.target.value);
+                      localStorage.setItem('cashdrawer_printer_name', e.target.value);
+                    }}
+                    disabled={drawerBusy}
+                  >
+                    <option value="">Selecciona una impresora</option>
+                    {drawerPrinters.map((p: any) => (
+                      <option key={p.name} value={p.name}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 13, opacity: 0.85 }}>Puerto COM</label>
+                    <select
+                      value={drawerPort}
+                      onChange={(e) => {
+                        setDrawerPort(e.target.value);
+                        localStorage.setItem('cashdrawer_port', e.target.value);
+                      }}
+                      disabled={drawerBusy}
+                    >
+                      <option value="">Selecciona un puerto</option>
+                      {drawerPorts.map((p: any) => (
+                        <option key={p.path} value={p.path}>
+                          {p.path} {p.friendlyName ? `- ${p.friendlyName}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 13, opacity: 0.85 }}>Baud rate</label>
+                    <input
+                      type="number"
+                      value={drawerBaudRate}
+                      onChange={(e) => {
+                        const v = Number(e.target.value || 9600);
+                        setDrawerBaudRate(v);
+                        localStorage.setItem('cashdrawer_baudrate', String(v));
+                      }}
+                      disabled={drawerBusy}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <button className="btn btn--ghost" onClick={handleOpenDrawer} disabled={drawerBusy}>
+                {drawerBusy ? 'Abriendo cajón...' : 'Abrir cajón'}
+              </button>
+
+              <div style={{ fontSize: 12, opacity: 0.72 }}>
+                También puedes usar el atajo <b>F6</b>.
+              </div>
+            </div>
 
               <div style={{ marginTop: 10, opacity: 0.75, fontSize: 13 }}>
                 Atajo rápido: presiona <b>F6</b> para abrir el cajón.
@@ -895,9 +1115,7 @@ export const POS = ({ user }: { user: any }) => {
         <h3>Ventas suspendidas</h3>
 
         <div style={{ display: 'grid', gap: 10 }}>
-          {suspendedRows.length === 0 && (
-            <div style={{ opacity: 0.8 }}>No hay ventas suspendidas.</div>
-          )}
+          {suspendedRows.length === 0 && <div style={{ opacity: 0.8 }}>No hay ventas suspendidas.</div>}
 
           {suspendedRows.map((row: any) => (
             <div
@@ -914,9 +1132,7 @@ export const POS = ({ user }: { user: any }) => {
               }}
             >
               <div>
-                <div style={{ fontWeight: 800 }}>
-                  {row.temp_number || row.tempNumber || 'Venta suspendida'}
-                </div>
+                <div style={{ fontWeight: 800 }}>{row.temp_number || row.tempNumber || 'Venta suspendida'}</div>
                 <div style={{ opacity: 0.8, fontSize: 13 }}>
                   Cliente: {row.customer_name || row.customerName || '—'} · Total: {money(Number(row.total ?? 0))}
                 </div>
@@ -934,9 +1150,7 @@ export const POS = ({ user }: { user: any }) => {
         <h3>Ventas recientes</h3>
 
         <div style={{ display: 'grid', gap: 10 }}>
-          {recentRows.length === 0 && (
-            <div style={{ opacity: 0.8 }}>No hay ventas recientes.</div>
-          )}
+          {recentRows.length === 0 && <div style={{ opacity: 0.8 }}>No hay ventas recientes.</div>}
 
           {recentRows.map((row: any) => (
             <div
@@ -953,9 +1167,7 @@ export const POS = ({ user }: { user: any }) => {
               }}
             >
               <div>
-                <div style={{ fontWeight: 800 }}>
-                  #{row.invoice_number || row.invoiceNumber || row.id}
-                </div>
+                <div style={{ fontWeight: 800 }}>#{row.invoice_number || row.invoiceNumber || row.id}</div>
                 <div style={{ opacity: 0.8, fontSize: 13 }}>
                   {row.customer_name || row.customerName || 'Consumidor final'} · {money(Number(row.total ?? 0))}
                 </div>
@@ -999,9 +1211,7 @@ export const POS = ({ user }: { user: any }) => {
                     background: 'rgba(255,255,255,.03)',
                   }}
                 >
-                  <div style={{ fontWeight: 700 }}>
-                    {item.name || item.description || 'Producto'}
-                  </div>
+                  <div style={{ fontWeight: 700 }}>{item.name || item.description || 'Producto'}</div>
                   <div style={{ opacity: 0.8, fontSize: 13 }}>
                     {item.qty} × {money(Number(item.unit_price ?? 0))} = {money(Number(item.line_total ?? 0))}
                   </div>

@@ -66,41 +66,56 @@ export const registerSalesIpc = (): void => {
   });
 
   ipcMain.handle('sales:print-invoice', async (_e, payload) => {
-    requirePermissionFromPayload(payload, 'pos:sell');
+  requirePermissionFromPayload(payload, 'pos:sell');
 
-    const html = typeof payload === 'string' ? payload : String((payload as any)?.html ?? '');
+  const html =
+    typeof payload === 'string'
+      ? payload
+      : String((payload as any)?.html ?? '');
 
-    const win = new BrowserWindow({
-      show: false,
-      webPreferences: {
-        sandbox: false,
-      },
-    });
+  const win = new BrowserWindow({
+    show: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: false,
+    },
+  });
 
+  try {
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
-    const tempDir = path.join(os.tmpdir(), 'sistetecni-pos');
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    await new Promise((resolve) => setTimeout(resolve, 350));
 
-    const filePath = path.join(tempDir, `factura-${Date.now()}.pdf`);
-
-    const pdfBuffer = await win.webContents.printToPDF({
-      printBackground: true,
-      preferCSSPageSize: true,
+    await new Promise<void>((resolve, reject) => {
+      win.webContents.print(
+        {
+          silent: false,
+          printBackground: true,
+          margins: {
+            marginType: 'none',
+          },
+          pageSize: {
+            width: 80000,
+            height: 200000,
+          },
+        } as any,
+        (success, failureReason) => {
+          if (!success) {
+            reject(new Error(failureReason || 'No se pudo imprimir la factura.'));
+            return;
+          }
+          resolve();
+        },
+      );
     });
 
-    fs.writeFileSync(filePath, pdfBuffer);
-
-    const openRes = await shell.openPath(filePath);
-    if (openRes) {
-      console.warn('[pdf] openPath error:', openRes);
+    return { ok: true };
+  } finally {
+    if (!win.isDestroyed()) {
+      win.close();
     }
-
-    win.webContents.print({ silent: false });
-
-    win.close();
-    return { ok: true, filePath };
-  });
+  }
+});
 
   ipcMain.handle('sales:suspend', async (_e, payload) => {
     requirePermissionFromPayload(payload, 'pos:sell');

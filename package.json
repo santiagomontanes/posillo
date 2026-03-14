@@ -23,7 +23,8 @@
     "productName": "Sistetecni POS",
     "asar": true,
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
@@ -39,13 +40,19 @@
           ]
         }
       ],
-      "artifactName": "SistetecniPOS-Setup-${version}.exe"
+      "artifactName": "SistetecniPOS-Setup-${version}.exe",
+      "requestedExecutionLevel": "requireAdministrator"
     },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": false
-    }
+"nsis": {
+  "oneClick": false,
+  "perMachine": true,
+  "allowToChangeInstallationDirectory": false,
+  "include": "installer.nsh",
+  "createDesktopShortcut": true,
+  "createStartMenuShortcut": true,
+  "shortcutName": "Sistetecni POS",
+  "warningsAsErrors": false
+}
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

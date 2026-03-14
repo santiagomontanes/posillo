@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ipc } from '../services/ipcClient';
 import { getAuthContext } from '../services/session';
-import { printInvoice } from '../services/sales';
 import { buildCashCloseHtml } from '../reports/cashCloseTemplate';
 import { getConfig } from '../services/config';
 
@@ -27,6 +26,84 @@ function fmtMoney(v: any): string {
   }).format(n);
 }
 
+function writeHtmlDocument(target: Window | null, title: string, html: string): void {
+  if (!target) {
+    alert('No se pudo abrir la vista previa del documento.');
+    return;
+  }
+
+  target.document.open();
+  target.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${title}</title>
+        <style>
+          body {
+            margin: 0;
+            background: #f3f4f6;
+            font-family: Arial, sans-serif;
+          }
+          .toolbar {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: #111827;
+            color: white;
+            padding: 12px 16px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+          }
+          .toolbar button {
+            border: 0;
+            border-radius: 10px;
+            padding: 10px 14px;
+            cursor: pointer;
+            font-weight: 700;
+          }
+          .toolbar .primary {
+            background: #2563eb;
+            color: white;
+          }
+          .toolbar .ghost {
+            background: #374151;
+            color: white;
+          }
+          .sheet {
+            max-width: 900px;
+            margin: 20px auto;
+            background: white;
+            box-shadow: 0 10px 30px rgba(0,0,0,.12);
+          }
+          @media print {
+            .toolbar { display: none !important; }
+            body { background: white; }
+            .sheet {
+              box-shadow: none;
+              max-width: 100%;
+              margin: 0;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="toolbar">
+          <div>${title}</div>
+          <div style="display:flex; gap:10px;">
+            <button class="primary" onclick="window.print()">Imprimir / Guardar PDF</button>
+            <button class="ghost" onclick="window.close()">Cerrar</button>
+          </div>
+        </div>
+        <div class="sheet">${html}</div>
+      </body>
+    </html>
+  `);
+  target.document.close();
+}
+
 export const Cash = ({ user }: { user: any }) => {
   const [open, setOpen] = useState<any>(null);
   const [status, setStatus] = useState<any>(null);
@@ -38,6 +115,7 @@ export const Cash = ({ user }: { user: any }) => {
 
   const [counted, setCounted] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
 
   const refresh = async (): Promise<void> => {
     try {
@@ -59,7 +137,7 @@ export const Cash = ({ user }: { user: any }) => {
       }
     } catch (err: any) {
       console.error('[cash.refresh] error:', err);
-      alert(err?.message || 'No se pudo refrescar el estado de caja.');
+      setMessage(err?.message || 'No se pudo refrescar el estado de caja.');
     }
   };
 
@@ -67,7 +145,6 @@ export const Cash = ({ user }: { user: any }) => {
     void refresh();
     const timer = setInterval(() => void refresh(), 5000);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const expectedCash = Number(status?.expectedCash ?? 0);
@@ -83,16 +160,59 @@ export const Cash = ({ user }: { user: any }) => {
 
   const handleCloseCash = async () => {
     if (!sessionId) {
-      alert('No se encontró la sesión de caja abierta.');
+      setMessage('No se encontró la sesión de caja abierta.');
       return;
     }
 
     if (!user?.id) {
-      alert('No se encontró el usuario actual.');
+      setMessage('No se encontró el usuario actual.');
       return;
     }
 
+    // Abrir la ventana ANTES del await
+    const preview = window.open('', '_blank', 'width=1000,height=800');
+
+    if (!preview) {
+      setMessage('No se pudo abrir la ventana del comprobante.');
+      return;
+    }
+
+    preview.document.open();
+    preview.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Generando comprobante...</title>
+          <style>
+            body {
+              margin: 0;
+              font-family: Arial, sans-serif;
+              background: #f3f4f6;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              color: #111827;
+            }
+            .box {
+              background: white;
+              padding: 24px;
+              border-radius: 14px;
+              box-shadow: 0 10px 30px rgba(0,0,0,.12);
+              font-weight: 700;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="box">Generando comprobante de cierre de caja...</div>
+        </body>
+      </html>
+    `);
+    preview.document.close();
+
     setLoading(true);
+    setMessage('');
 
     try {
       const res = await ipc.cash.close({
@@ -124,19 +244,20 @@ export const Cash = ({ user }: { user: any }) => {
         diff: Number(res?.diff ?? 0),
       });
 
-      await printInvoice(html);
+      writeHtmlDocument(preview, `Cierre de caja ${fmtDate(res?.closedAt)}`, html);
 
-      alert(
-        `Caja cerrada correctamente.\nDiferencia: ${fmtMoney(res?.diff)}\nBackup: ${
-          res?.backupPath ?? 'N/A'
-        }`,
+      setMessage(
+        `Caja cerrada correctamente. Diferencia: ${fmtMoney(res?.diff)}. Backup: ${res?.backupPath ?? 'N/A'}`,
       );
 
       setCounted(0);
       await refresh();
     } catch (err: any) {
       console.error('[cash.close] error:', err);
-      alert(err?.message || 'No se pudo cerrar la caja.');
+      try {
+        preview.close();
+      } catch {}
+      setMessage(err?.message || 'No se pudo cerrar la caja.');
     } finally {
       setLoading(false);
     }
@@ -144,11 +265,12 @@ export const Cash = ({ user }: { user: any }) => {
 
   const handleOpenCash = async () => {
     if (openingDiffersFromSuggestion && !openingNotes.trim()) {
-      alert('Debes ingresar una nota o justificación cuando el efectivo inicial difiere del sugerido.');
+      setMessage('Debes ingresar una nota o justificación cuando el efectivo inicial difiere del sugerido.');
       return;
     }
 
     setLoading(true);
+    setMessage('');
 
     try {
       await ipc.cash.open({
@@ -162,10 +284,11 @@ export const Cash = ({ user }: { user: any }) => {
 
       setTouched(false);
       setOpeningNotes('');
+      setMessage('Caja abierta correctamente.');
       await refresh();
     } catch (err: any) {
       console.error('[cash.open] error:', err);
-      alert(err?.message || 'No se pudo abrir la caja.');
+      setMessage(err?.message || 'No se pudo abrir la caja.');
     } finally {
       setLoading(false);
     }
@@ -184,6 +307,12 @@ export const Cash = ({ user }: { user: any }) => {
           </p>
         </div>
       </div>
+
+      {message ? (
+        <div className="pos__msg" style={{ marginBottom: 14 }}>
+          {message}
+        </div>
+      ) : null}
 
       {open ? (
         <>

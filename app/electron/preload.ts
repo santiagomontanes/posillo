@@ -128,7 +128,8 @@ sales: {
     restore: (payload: unknown) => ipcRenderer.invoke('backups:restore', payload),
   },
   cashdrawer: {
-    listPorts: () => ipcRenderer.invoke('cashdrawer:list-ports'),
-    open: (payload: unknown) => ipcRenderer.invoke('cashdrawer:open', payload),
+  listPorts: () => ipcRenderer.invoke('cashdrawer:list-ports'),
+  listPrinters: () => ipcRenderer.invoke('cashdrawer:list-printers'),
+  open: (payload: unknown) => ipcRenderer.invoke('cashdrawer:open', payload),
   },
 });
