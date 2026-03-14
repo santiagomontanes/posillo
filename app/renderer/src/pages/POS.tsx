@@ -812,44 +812,192 @@ setMessage(
     </div>
 
           <div className="pos__cart">
-            {cart.map((i) => (
-              <div key={i.cart_id} className="pos__cart-row">
-                <div className="pos__cart-info">
-                  <div className="pos__cart-name">{i.name}</div>
-                  <div className="pos__cart-meta">
-                    <span>{money(i.unit_price)} c/u</span>
-                    {i.stock != null && <span>Disp: {i.stock}</span>}
-                  </div>
-                </div>
+  {cart.map((i) => {
+    const canDecrease = i.qty > 1;
+    const canIncrease = i.stock == null ? true : i.qty < i.stock;
 
-                <div className="pos__qty">
-                  <button className="qtybtn" onClick={() => setQty(i.cart_id, i.qty - 1)} disabled={isProcessing}>
-                    −
-                  </button>
-                  <input
-                    className="qtyinput"
-                    type="number"
-                    min={1}
-                    max={i.stock ?? undefined}
-                    value={i.qty}
-                    disabled={isProcessing}
-                    onChange={(e) => setQty(i.cart_id, Number(e.target.value || 1))}
-                  />
-                  <button className="qtybtn" onClick={() => setQty(i.cart_id, i.qty + 1)} disabled={isProcessing}>
-                    +
-                  </button>
-                </div>
-
-                <div className="pos__line-total">{money(i.line_total)}</div>
-
-                <button className="btn btn--ghost" onClick={() => removeItem(i.cart_id)} disabled={isProcessing}>
-                  Eliminar
-                </button>
-              </div>
-            ))}
-
-            {cart.length === 0 && <div className="pos__empty">Agrega productos para iniciar una venta.</div>}
+    return (
+      <div
+        key={i.cart_id}
+        className="pos__cart-row"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr)',
+          gap: 12,
+          alignItems: 'stretch',
+          padding: 12,
+          borderRadius: 16,
+          border: '1px solid rgba(255,255,255,.08)',
+          background: 'rgba(255,255,255,.02)',
+        }}
+      >
+        <div
+          className="pos__cart-info"
+          style={{
+            minWidth: 0,
+          }}
+        >
+          <div
+            className="pos__cart-name"
+            style={{
+              fontWeight: 900,
+              fontSize: 'clamp(18px, 2.2vw, 26px)',
+              lineHeight: 1.15,
+              wordBreak: 'break-word',
+              overflowWrap: 'anywhere',
+              letterSpacing: '-0.02em',
+            }}
+          >
+            {i.name}
           </div>
+
+          <div
+            className="pos__cart-meta"
+            style={{
+              display: 'flex',
+              gap: 10,
+              flexWrap: 'wrap',
+              opacity: 0.8,
+              fontSize: 'clamp(12px, 1.5vw, 14px)',
+              marginTop: 6,
+            }}
+          >
+            <span>{money(i.unit_price)} c/u</span>
+            {i.stock != null && <span>Disp: {i.stock}</span>}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0,1fr)',
+            gap: 10,
+          }}
+        >
+          <div
+            className="pos__qty"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '44px minmax(64px, 84px) 44px',
+              gap: 8,
+              alignItems: 'center',
+              justifyContent: 'start',
+            }}
+          >
+            <button
+              className="qtybtn"
+              onClick={() => setQty(i.cart_id, i.qty - 1)}
+              disabled={isProcessing || !canDecrease}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 14,
+                border: '1px solid rgba(255,255,255,.14)',
+                background: 'rgba(59,130,246,.22)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                color: '#fff',
+                fontSize: 28,
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: isProcessing || !canDecrease ? 'not-allowed' : 'pointer',
+                opacity: isProcessing || !canDecrease ? 0.35 : 1,
+                boxShadow: '0 8px 24px rgba(59,130,246,.18)',
+                transition: 'all .2s ease',
+              }}
+            >
+              −
+            </button>
+
+            <input
+              className="qtyinput"
+              type="number"
+              min={1}
+              max={i.stock ?? undefined}
+              value={i.qty}
+              disabled={isProcessing}
+              onChange={(e) => setQty(i.cart_id, Number(e.target.value || 1))}
+              style={{
+                width: '100%',
+                height: 44,
+                textAlign: 'center',
+                borderRadius: 14,
+                border: '1px solid rgba(255,255,255,.08)',
+                background: 'rgba(255,255,255,.03)',
+                color: '#fff',
+                fontSize: 'clamp(18px, 2vw, 22px)',
+                fontWeight: 800,
+              }}
+            />
+
+            <button
+              className="qtybtn"
+              onClick={() => setQty(i.cart_id, i.qty + 1)}
+              disabled={isProcessing || !canIncrease}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 14,
+                border: '1px solid rgba(255,255,255,.14)',
+                background: 'rgba(59,130,246,.22)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                color: '#fff',
+                fontSize: 28,
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: isProcessing || !canIncrease ? 'not-allowed' : 'pointer',
+                opacity: isProcessing || !canIncrease ? 0.35 : 1,
+                boxShadow: '0 8px 24px rgba(59,130,246,.18)',
+                transition: 'all .2s ease',
+              }}
+            >
+              +
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div
+              className="pos__line-total"
+              style={{
+                fontWeight: 900,
+                fontSize: 'clamp(20px, 2.5vw, 30px)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {money(i.line_total)}
+            </div>
+
+            <button
+              className="btn btn--ghost"
+              onClick={() => removeItem(i.cart_id)}
+              disabled={isProcessing}
+              style={{
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Eliminar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  })}
+
+  {cart.length === 0 && <div className="pos__empty">Agrega productos para iniciar una venta.</div>}
+</div>
 
           <div className="pos__pay card" style={{ marginTop: 12 }}>
             <div className="pos__pay-row">

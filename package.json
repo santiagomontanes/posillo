@@ -1,6 +1,6 @@
 {
   "name": "sistetecni-pos-electron",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "POS offline para Sistetecni (Electron + React + SQLite)",
   "main": "dist/electron/app/electron/main.js",
   "author": "Sistetecni",
@@ -23,42 +23,52 @@
     "productName": "Sistetecni POS",
     "asar": true,
     "directories": {
-      "output": "release",
-      "buildResources": "build"
+      "output": "release"
     },
     "files": [
       "dist/**/*",
       "database/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "resources/mysql-8.0.msi",
+        "to": "resources/mysql-8.0.msi"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "santiagomontanes",
+        "repo": "posillo"
+      }
+    ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
       ],
       "artifactName": "SistetecniPOS-Setup-${version}.exe",
       "requestedExecutionLevel": "requireAdministrator"
     },
-"nsis": {
-  "oneClick": false,
-  "perMachine": true,
-  "allowToChangeInstallationDirectory": false,
-  "include": "installer.nsh",
-  "createDesktopShortcut": true,
-  "createStartMenuShortcut": true,
-  "shortcutName": "Sistetecni POS",
-  "warningsAsErrors": false
-}
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": false,
+      "include": "build/installer.nsh",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sistetecni POS"
+    }
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.6.2",
     "chart.js": "^4.4.8",
     "dotenv": "^17.3.1",
+    "electron-updater": "^6.3.9",
     "lucide-react": "^0.577.0",
     "mysql2": "^3.18.2",
     "pdfkit": "^0.16.0",
