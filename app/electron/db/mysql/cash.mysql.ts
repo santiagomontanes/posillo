@@ -10,8 +10,27 @@ const mysqlLocalDateTime = (value = new Date()): string => {
 
 const normalizeDbDateTime = (value: any): string => {
   if (!value) return mysqlLocalDateTime();
+
+  if (value instanceof Date) {
+    return mysqlLocalDateTime(value);
+  }
+
   const s = String(value).trim();
-  return s.slice(0, 19).replace('T', ' ');
+
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    return s;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(s)) {
+    return s.slice(0, 19).replace('T', ' ');
+  }
+
+  const d = new Date(value);
+  if (!isNaN(d.getTime())) {
+    return mysqlLocalDateTime(d);
+  }
+
+  return mysqlLocalDateTime();
 };
 
 export const openCashMySql = async (data: {
@@ -19,6 +38,11 @@ export const openCashMySql = async (data: {
   openingCash: number;
   openingNotes?: string;
 }): Promise<string> => {
+  const alreadyOpen = await getOpenCashMySql();
+  if (alreadyOpen) {
+    throw new Error('Ya existe una caja abierta. Debes cerrarla antes de abrir una nueva.');
+  }
+
   const id = uuid();
   const openedAt = mysqlLocalDateTime();
 
@@ -39,7 +63,21 @@ export const openCashMySql = async (data: {
 
 export const getOpenCashMySql = async (): Promise<any> => {
   const rows = await mysqlQuery<any>(
-    `SELECT * FROM cash_closures
+    `SELECT
+        id,
+        DATE_FORMAT(opened_at, '%Y-%m-%d %H:%i:%s') AS opened_at,
+        opened_by,
+        opening_cash,
+        opening_notes,
+        DATE_FORMAT(closed_at, '%Y-%m-%d %H:%i:%s') AS closed_at,
+        closed_by,
+        counted_cash,
+        expected_cash,
+        total_sales,
+        total_expenses,
+        difference,
+        notes
+     FROM cash_closures
      WHERE closed_at IS NULL
      ORDER BY opened_at DESC
      LIMIT 1`,
@@ -51,7 +89,14 @@ export const getOpenCashMySql = async (): Promise<any> => {
 
 export const getOpenSuggestionMySql = async (): Promise<any> => {
   const rows = await mysqlQuery<any>(
-    `SELECT * FROM cash_closures
+    `SELECT
+        id,
+        DATE_FORMAT(opened_at, '%Y-%m-%d %H:%i:%s') AS opened_at,
+        DATE_FORMAT(closed_at, '%Y-%m-%d %H:%i:%s') AS closed_at,
+        opening_cash,
+        counted_cash,
+        expected_cash
+     FROM cash_closures
      WHERE closed_at IS NOT NULL
      ORDER BY closed_at DESC
      LIMIT 1`,
@@ -88,12 +133,17 @@ export const getCashStatusMySql = async (): Promise<any> => {
   const openedAt = normalizeDbDateTime(open.opened_at);
   const now = mysqlLocalDateTime();
 
-  console.log('[CASH STATUS MYSQL]', { openedAt, now });
+  console.log('[CASH STATUS MYSQL]', {
+  openId: open.id,
+  rawOpenedAt: open.opened_at,
+  openedAt,
+  now,
+});
 
   const cashSalesRows = await mysqlQuery<any>(
     `SELECT COALESCE(SUM(total),0) as total
      FROM sales
-     WHERE date BETWEEN ? AND ?
+     WHERE created_at BETWEEN ? AND ?
        AND UPPER(TRIM(payment_method)) = ?`,
     [openedAt, now, 'EFECTIVO'],
   );
@@ -101,11 +151,17 @@ export const getCashStatusMySql = async (): Promise<any> => {
   const expensesRows = await mysqlQuery<any>(
     `SELECT COALESCE(SUM(amount),0) as total
      FROM expenses
-     WHERE date BETWEEN ? AND ?`,
+     WHERE created_at BETWEEN ? AND ?`,
     [openedAt, now],
-  );
+  ).catch(async () => {
+    return await mysqlQuery<any>(
+      `SELECT COALESCE(SUM(amount),0) as total
+       FROM expenses
+       WHERE date BETWEEN ? AND ?`,
+      [openedAt, now],
+    );
+  });
 
-  // ✅ devoluciones en efectivo del turno
   const returnsRows = await mysqlQuery<any>(
     `SELECT COALESCE(SUM(sr.total_returned),0) as total
      FROM sale_returns sr
@@ -120,7 +176,6 @@ export const getCashStatusMySql = async (): Promise<any> => {
   const cashReturns = Number(returnsRows?.[0]?.total ?? 0);
   const openingCash = Number(open.opening_cash ?? 0);
 
-  // ✅ efectivo real esperado
   const expectedCash = openingCash + cashSales - expenses - cashReturns;
 
   return {
@@ -141,12 +196,29 @@ export const closeCashMySql = async (data: {
   notes: string;
 }): Promise<any> => {
   const rows = await mysqlQuery<any>(
-    `SELECT * FROM cash_closures WHERE id = ? LIMIT 1`,
-    [String(data.id)],
-  );
+  `SELECT
+      id,
+      DATE_FORMAT(opened_at, '%Y-%m-%d %H:%i:%s') AS opened_at,
+      opened_by,
+      opening_cash,
+      opening_notes,
+      DATE_FORMAT(closed_at, '%Y-%m-%d %H:%i:%s') AS closed_at,
+      closed_by,
+      counted_cash,
+      expected_cash,
+      total_sales,
+      total_expenses,
+      difference,
+      notes
+   FROM cash_closures
+   WHERE id = ?
+   LIMIT 1`,
+  [String(data.id)],
+);
 
   const cash = rows?.[0];
   if (!cash) throw new Error('Caja no encontrada.');
+  if (cash.closed_at) throw new Error('Esta caja ya fue cerrada.');
 
   const openedAt = normalizeDbDateTime(cash.opened_at);
   const closedAt = mysqlLocalDateTime();
@@ -156,16 +228,23 @@ export const closeCashMySql = async (data: {
         COALESCE(SUM(total),0) as total,
         COALESCE(SUM(CASE WHEN UPPER(TRIM(payment_method)) = ? THEN total ELSE 0 END),0) as cashSales
      FROM sales
-     WHERE date BETWEEN ? AND ?`,
+     WHERE created_at BETWEEN ? AND ?`,
     ['EFECTIVO', openedAt, closedAt],
   );
 
   const expensesRows = await mysqlQuery<any>(
     `SELECT COALESCE(SUM(amount),0) as total
      FROM expenses
-     WHERE date BETWEEN ? AND ?`,
+     WHERE created_at BETWEEN ? AND ?`,
     [openedAt, closedAt],
-  );
+  ).catch(async () => {
+    return await mysqlQuery<any>(
+      `SELECT COALESCE(SUM(amount),0) as total
+       FROM expenses
+       WHERE date BETWEEN ? AND ?`,
+      [openedAt, closedAt],
+    );
+  });
 
   const returnsRows = await mysqlQuery<any>(
     `SELECT COALESCE(SUM(sr.total_returned),0) as total
@@ -189,7 +268,7 @@ export const closeCashMySql = async (data: {
     `UPDATE cash_closures
      SET closed_at = ?, closed_by = ?, counted_cash = ?, expected_cash = ?,
          total_sales = ?, total_expenses = ?, difference = ?, notes = ?
-     WHERE id = ?`,
+     WHERE id = ? AND closed_at IS NULL`,
     [
       closedAt,
       String(data.userId),

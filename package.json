@@ -30,12 +30,7 @@
       "database/**/*",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "resources/mysql-8.0.msi",
-        "to": "resources/mysql-8.0.msi"
-      }
-    ],
+    
     "publish": [
       {
         "provider": "github",
@@ -57,7 +52,6 @@
       "oneClick": false,
       "perMachine": true,
       "allowToChangeInstallationDirectory": false,
-      "include": "build/installer.nsh",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Sistetecni POS"
