@@ -64,7 +64,12 @@ export const POS = ({ user }: { user: any }) => {
   const [customerId, setCustomerId] = useState('');
   const [showCustomer, setShowCustomer] = useState(false);
 
-  const [biz, setBiz] = useState<{ name?: string; logoDataUrl?: string }>({});
+  const [biz, setBiz] = useState<{
+    name?: string;
+    logoDataUrl?: string;
+    nit?: string;
+    phone?: string;
+  }>({});
 
   const [suspendedOpen, setSuspendedOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
@@ -130,6 +135,9 @@ export const POS = ({ user }: { user: any }) => {
       } catch {}
     })();
   }, []);
+
+  const [askPrint, setAskPrint] = useState(false);
+  const [pendingInvoice, setPendingInvoice] = useState<any>(null);
 
   const onRootClick = (e: React.MouseEvent) => {
     const el = e.target as HTMLElement;
@@ -425,32 +433,42 @@ export const POS = ({ user }: { user: any }) => {
   };
 
   const handleReprintFromDetail = async () => {
-    if (!saleDetail) return;
+    if (!saleDetail || !saleDetail.invoice_number) {
+      setMessage('No se pudo obtener el número de factura.');
+      return;
+    }
 
     const html = buildInvoiceHtml({
-      invoiceNumber: String(saleDetail.invoice_number ?? ''),
-      createdAt: saleDetail.date ?? new Date().toISOString(),
-      cashierName: saleDetail.user_name || saleDetail.user_email || 'Cajero',
-      paymentMethod: saleDetail.payment_method || 'EFECTIVO',
-      customerName: saleDetail.customer_name || 'Consumidor final',
-      customerId: saleDetail.customer_id || '',
-      subtotal: Number(saleDetail.subtotal ?? 0),
-      discount: Number(saleDetail.discount ?? 0),
-      total: Number(saleDetail.total ?? 0),
+      invoiceNumber: String(saleDetail?.invoice_number ?? ''),
+      createdAt: saleDetail?.date ?? new Date().toISOString(),
+      cashierName: saleDetail?.user_name ?? saleDetail?.user_email ?? 'Cajero',
+      paymentMethod: saleDetail?.payment_method ?? 'EFECTIVO',
+      customerName: saleDetail?.customer_name ?? 'Consumidor final',
+      customerId: saleDetail?.customer_id ?? '',
+      subtotal: Number(saleDetail?.subtotal ?? 0),
+      discount: Number(saleDetail?.discount ?? 0),
+      total: Number(saleDetail?.total ?? 0),
       cashReceived: 0,
       cashChange: 0,
-      businessName: biz?.name || '',
-      businessLogoDataUrl: biz?.logoDataUrl || '',
-      items: (saleDetail.items ?? []).map((i: any) => ({
-        name: i.name ?? i.description ?? 'Producto',
-        description: i.description || '',
-        qty: Number(i.qty ?? 0),
-        unit_price: Number(i.unit_price ?? 0),
-        line_total: Number(i.line_total ?? 0),
+      businessName: biz?.name ?? '',
+      businessLogoDataUrl: biz?.logoDataUrl ?? '',
+      businessNit: biz?.nit ?? '',
+      businessPhone: biz?.phone ?? '',
+      items: (saleDetail?.items ?? []).map((item: any) => ({
+        name: item?.name ?? item?.description ?? 'Producto',
+        description: item?.description ?? '',
+        qty: Number(item?.qty ?? 0),
+        unit_price: Number(item?.unit_price ?? 0),
+        line_total: Number(item?.line_total ?? 0),
       })),
     });
 
-    await printInvoice(html);
+    setPendingInvoice({
+      html,
+      invoiceNumber: saleDetail?.invoice_number ?? '',
+    });
+
+    setAskPrint(true);
   };
 
   const handleReturnSale = async () => {
@@ -536,6 +554,10 @@ export const POS = ({ user }: { user: any }) => {
     return () => window.removeEventListener('keydown', handleShortcut);
   }, [drawerBusy, drawerMode, drawerPort, drawerBaudRate, drawerPrinterName]);
 
+  // FIX 1: invoiceNumber usa res.invoiceNumber (no saleDetail)
+  // FIX 2: se agrega setAskPrint(true) para abrir el modal
+  // FIX 3: se eliminan clearCart/setCustomerName/setCustomerId de aquí
+  //         (ya se ejecutan dentro del modal askPrint)
   const confirm = async (): Promise<void> => {
     if (isProcessing) return;
     if (cart.length === 0) return setMessage('El carrito está vacío.');
@@ -585,6 +607,8 @@ export const POS = ({ user }: { user: any }) => {
         cashChange: paymentMethod === 'EFECTIVO' ? change : 0,
         businessName: biz?.name || '',
         businessLogoDataUrl: biz?.logoDataUrl || '',
+        businessNit: biz?.nit || '',
+        businessPhone: biz?.phone || '',
         items: cart.map((i: any) => ({
           name: i.name,
           description: i.description || '',
@@ -594,24 +618,17 @@ export const POS = ({ user }: { user: any }) => {
         })),
       });
 
-      const shouldPrint = window.confirm('¿Deseas imprimir el tiquete?');
+      // FIX 1: usar res.invoiceNumber
+      setPendingInvoice({
+        html,
+        invoiceNumber: String(res.invoiceNumber ?? ''),
+      });
 
-if (shouldPrint) {
-  await printInvoice(html);
-}
+      // FIX 2: abrir modal de impresión
+      setAskPrint(true);
 
-if (paymentMethod === 'EFECTIVO') {
-  await handleOpenDrawer();
-}
+      // FIX 3: cajón y limpieza se manejan dentro del modal askPrint
 
-clearCart();
-setCustomerName('');
-setCustomerId('');
-setMessage(
-  shouldPrint
-    ? `Venta realizada e impresa. Factura #${String(res.invoiceNumber ?? '')}`
-    : `Venta realizada sin impresión. Factura #${String(res.invoiceNumber ?? '')}`,
-);
     } catch (e: any) {
       setMessage(e?.message || 'No se pudo confirmar la venta.');
     } finally {
@@ -637,16 +654,6 @@ setMessage(
           left: -9999,
         }}
       />
-
-      {/*<div className="card dashboard__hero">
-        <div>
-          <div className="dashboard__eyebrow">Punto de venta</div>
-          <h2 className="dashboard__title">Cobro rápido y control del carrito</h2>
-          <p className="dashboard__text">
-            Busca productos, escanea códigos, agrega ítems libres y finaliza ventas con distintos métodos de pago.
-          </p>
-        </div>
-      </div>*/}
 
       <div className="pos">
         <section className="pos__left card">
@@ -775,229 +782,227 @@ setMessage(
           </div>
 
           <div style={{ marginTop: 12 }}>
-  {!showCustomer && (
-    <button
-      className="btn btn--ghost"
-      onClick={() => setShowCustomer(true)}
-    >
-      Agregar datos del cliente
-    </button>
-  )}
+            {!showCustomer && (
+              <button
+                className="btn btn--ghost"
+                onClick={() => setShowCustomer(true)}
+              >
+                Agregar datos del cliente
+              </button>
+            )}
 
-  {showCustomer && (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <input
-        placeholder="Nombre del cliente"
-        value={customerName}
-        onChange={(e) => setCustomerName(e.target.value)}
-      />
-      <input
-        placeholder="Documento o identificación"
-        value={customerId}
-        onChange={(e) => setCustomerId(e.target.value)}
-      />
+            {showCustomer && (
+              <div style={{ display: 'grid', gap: 10 }}>
+                <input
+                  placeholder="Nombre del cliente"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                />
+                <input
+                  placeholder="Documento o identificación"
+                  value={customerId}
+                  onChange={(e) => setCustomerId(e.target.value)}
+                />
 
-      <button
-        className="btn btn--ghost"
-        onClick={() => {
-          setShowCustomer(false);
-          setCustomerName('');
-          setCustomerId('');
-        }}
-          >
-        Quitar datos del cliente
-          </button>
-         </div>
-          )}
-    </div>
+                <button
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    setShowCustomer(false);
+                    setCustomerName('');
+                    setCustomerId('');
+                  }}
+                >
+                  Quitar datos del cliente
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="pos__cart">
-  {cart.map((i) => {
-    const canDecrease = i.qty > 1;
-    const canIncrease = i.stock == null ? true : i.qty < i.stock;
+            {cart.map((i) => {
+              const canDecrease = i.qty > 1;
+              const canIncrease = i.stock == null ? true : i.qty < i.stock;
 
-    return (
-      <div
-        key={i.cart_id}
-        className="pos__cart-row"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr)',
-          gap: 12,
-          alignItems: 'stretch',
-          padding: 12,
-          borderRadius: 16,
-          border: '1px solid rgba(255,255,255,.08)',
-          background: 'rgba(255,255,255,.02)',
-        }}
-      >
-        <div
-          className="pos__cart-info"
-          style={{
-            minWidth: 0,
-          }}
-        >
-          <div
-            className="pos__cart-name"
-            style={{
-              fontWeight: 900,
-              fontSize: 'clamp(18px, 2.2vw, 26px)',
-              lineHeight: 1.15,
-              wordBreak: 'break-word',
-              overflowWrap: 'anywhere',
-              letterSpacing: '-0.02em',
-            }}
-          >
-            {i.name}
+              return (
+                <div
+                  key={i.cart_id}
+                  className="pos__cart-row"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1fr)',
+                    gap: 12,
+                    alignItems: 'stretch',
+                    padding: 12,
+                    borderRadius: 16,
+                    border: '1px solid rgba(255,255,255,.08)',
+                    background: 'rgba(255,255,255,.02)',
+                  }}
+                >
+                  <div
+                    className="pos__cart-info"
+                    style={{ minWidth: 0 }}
+                  >
+                    <div
+                      className="pos__cart-name"
+                      style={{
+                        fontWeight: 900,
+                        fontSize: 'clamp(18px, 2.2vw, 26px)',
+                        lineHeight: 1.15,
+                        wordBreak: 'break-word',
+                        overflowWrap: 'anywhere',
+                        letterSpacing: '-0.02em',
+                      }}
+                    >
+                      {i.name}
+                    </div>
+
+                    <div
+                      className="pos__cart-meta"
+                      style={{
+                        display: 'flex',
+                        gap: 10,
+                        flexWrap: 'wrap',
+                        opacity: 0.8,
+                        fontSize: 'clamp(12px, 1.5vw, 14px)',
+                        marginTop: 6,
+                      }}
+                    >
+                      <span>{money(i.unit_price)} c/u</span>
+                      {i.stock != null && <span>Disp: {i.stock}</span>}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(0,1fr)',
+                      gap: 10,
+                    }}
+                  >
+                    <div
+                      className="pos__qty"
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '44px minmax(64px, 84px) 44px',
+                        gap: 8,
+                        alignItems: 'center',
+                        justifyContent: 'start',
+                      }}
+                    >
+                      <button
+                        className="qtybtn"
+                        onClick={() => setQty(i.cart_id, i.qty - 1)}
+                        disabled={isProcessing || !canDecrease}
+                        style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 14,
+                          border: '1px solid rgba(255,255,255,.14)',
+                          background: 'rgba(59,130,246,.22)',
+                          backdropFilter: 'blur(8px)',
+                          WebkitBackdropFilter: 'blur(8px)',
+                          color: '#fff',
+                          fontSize: 28,
+                          fontWeight: 800,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: isProcessing || !canDecrease ? 'not-allowed' : 'pointer',
+                          opacity: isProcessing || !canDecrease ? 0.35 : 1,
+                          boxShadow: '0 8px 24px rgba(59,130,246,.18)',
+                          transition: 'all .2s ease',
+                        }}
+                      >
+                        −
+                      </button>
+
+                      <input
+                        className="qtyinput"
+                        type="number"
+                        min={1}
+                        max={i.stock ?? undefined}
+                        value={i.qty}
+                        disabled={isProcessing}
+                        onChange={(e) => setQty(i.cart_id, Number(e.target.value || 1))}
+                        style={{
+                          width: '100%',
+                          height: 44,
+                          textAlign: 'center',
+                          borderRadius: 14,
+                          border: '1px solid rgba(255,255,255,.08)',
+                          background: 'rgba(255,255,255,.03)',
+                          color: '#fff',
+                          fontSize: 'clamp(18px, 2vw, 22px)',
+                          fontWeight: 800,
+                        }}
+                      />
+
+                      <button
+                        className="qtybtn"
+                        onClick={() => setQty(i.cart_id, i.qty + 1)}
+                        disabled={isProcessing || !canIncrease}
+                        style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 14,
+                          border: '1px solid rgba(255,255,255,.14)',
+                          background: 'rgba(59,130,246,.22)',
+                          backdropFilter: 'blur(8px)',
+                          WebkitBackdropFilter: 'blur(8px)',
+                          color: '#fff',
+                          fontSize: 28,
+                          fontWeight: 800,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: isProcessing || !canIncrease ? 'not-allowed' : 'pointer',
+                          opacity: isProcessing || !canIncrease ? 0.35 : 1,
+                          boxShadow: '0 8px 24px rgba(59,130,246,.18)',
+                          transition: 'all .2s ease',
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 10,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <div
+                        className="pos__line-total"
+                        style={{
+                          fontWeight: 900,
+                          fontSize: 'clamp(20px, 2.5vw, 30px)',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {money(i.line_total)}
+                      </div>
+
+                      <button
+                        className="btn btn--ghost"
+                        onClick={() => removeItem(i.cart_id)}
+                        disabled={isProcessing}
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {cart.length === 0 && (
+              <div className="pos__empty">Agrega productos para iniciar una venta.</div>
+            )}
           </div>
-
-          <div
-            className="pos__cart-meta"
-            style={{
-              display: 'flex',
-              gap: 10,
-              flexWrap: 'wrap',
-              opacity: 0.8,
-              fontSize: 'clamp(12px, 1.5vw, 14px)',
-              marginTop: 6,
-            }}
-          >
-            <span>{money(i.unit_price)} c/u</span>
-            {i.stock != null && <span>Disp: {i.stock}</span>}
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0,1fr)',
-            gap: 10,
-          }}
-        >
-          <div
-            className="pos__qty"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '44px minmax(64px, 84px) 44px',
-              gap: 8,
-              alignItems: 'center',
-              justifyContent: 'start',
-            }}
-          >
-            <button
-              className="qtybtn"
-              onClick={() => setQty(i.cart_id, i.qty - 1)}
-              disabled={isProcessing || !canDecrease}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 14,
-                border: '1px solid rgba(255,255,255,.14)',
-                background: 'rgba(59,130,246,.22)',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-                color: '#fff',
-                fontSize: 28,
-                fontWeight: 800,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: isProcessing || !canDecrease ? 'not-allowed' : 'pointer',
-                opacity: isProcessing || !canDecrease ? 0.35 : 1,
-                boxShadow: '0 8px 24px rgba(59,130,246,.18)',
-                transition: 'all .2s ease',
-              }}
-            >
-              −
-            </button>
-
-            <input
-              className="qtyinput"
-              type="number"
-              min={1}
-              max={i.stock ?? undefined}
-              value={i.qty}
-              disabled={isProcessing}
-              onChange={(e) => setQty(i.cart_id, Number(e.target.value || 1))}
-              style={{
-                width: '100%',
-                height: 44,
-                textAlign: 'center',
-                borderRadius: 14,
-                border: '1px solid rgba(255,255,255,.08)',
-                background: 'rgba(255,255,255,.03)',
-                color: '#fff',
-                fontSize: 'clamp(18px, 2vw, 22px)',
-                fontWeight: 800,
-              }}
-            />
-
-            <button
-              className="qtybtn"
-              onClick={() => setQty(i.cart_id, i.qty + 1)}
-              disabled={isProcessing || !canIncrease}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 14,
-                border: '1px solid rgba(255,255,255,.14)',
-                background: 'rgba(59,130,246,.22)',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-                color: '#fff',
-                fontSize: 28,
-                fontWeight: 800,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: isProcessing || !canIncrease ? 'not-allowed' : 'pointer',
-                opacity: isProcessing || !canIncrease ? 0.35 : 1,
-                boxShadow: '0 8px 24px rgba(59,130,246,.18)',
-                transition: 'all .2s ease',
-              }}
-            >
-              +
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: 10,
-              flexWrap: 'wrap',
-            }}
-          >
-            <div
-              className="pos__line-total"
-              style={{
-                fontWeight: 900,
-                fontSize: 'clamp(20px, 2.5vw, 30px)',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {money(i.line_total)}
-            </div>
-
-            <button
-              className="btn btn--ghost"
-              onClick={() => removeItem(i.cart_id)}
-              disabled={isProcessing}
-              style={{
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Eliminar
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  })}
-
-  {cart.length === 0 && <div className="pos__empty">Agrega productos para iniciar una venta.</div>}
-</div>
 
           <div className="pos__pay card" style={{ marginTop: 12 }}>
             <div className="pos__pay-row">
@@ -1063,8 +1068,6 @@ setMessage(
               </div>
             )}
 
-            
-
             {message && <div className="pos__msg">{message}</div>}
 
             <div className="pos__total">
@@ -1074,18 +1077,12 @@ setMessage(
 
             <button
               className="pos__confirm"
-              style={{
-              fontSize: 22,
-              padding: "16px",
-              marginTop: 10
-                }}
+              style={{ fontSize: 22, padding: '16px', marginTop: 10 }}
               onClick={confirm}
               disabled={!canConfirm}
-              >
+            >
               {isProcessing ? 'Procesando...' : '💰 COBRAR'}
             </button>
-
-            
 
             <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
               <button
@@ -1097,106 +1094,106 @@ setMessage(
               </button>
 
               <div
-              style={{
-                marginTop: 14,
-                padding: 12,
-                borderRadius: 14,
-                border: '1px solid rgba(255,255,255,.08)',
-                background: 'rgba(255,255,255,.03)',
-                display: 'grid',
-                gap: 10,
-              }}
-            >
-              <div style={{ fontWeight: 900 }}>Cajón de dinero</div>
+                style={{
+                  marginTop: 14,
+                  padding: 12,
+                  borderRadius: 14,
+                  border: '1px solid rgba(255,255,255,.08)',
+                  background: 'rgba(255,255,255,.03)',
+                  display: 'grid',
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontWeight: 900 }}>Cajón de dinero</div>
 
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button
-                  className={`chip ${drawerMode === 'printer' ? 'chip--active' : ''}`}
-                  onClick={() => {
-                    setDrawerMode('printer');
-                    localStorage.setItem('cashdrawer_mode', 'printer');
-                  }}
-                  disabled={drawerBusy}
-                >
-                  Por impresora
-                </button>
-
-                <button
-                  className={`chip ${drawerMode === 'serial' ? 'chip--active' : ''}`}
-                  onClick={() => {
-                    setDrawerMode('serial');
-                    localStorage.setItem('cashdrawer_mode', 'serial');
-                  }}
-                  disabled={drawerBusy}
-                >
-                  Por puerto COM
-                </button>
-              </div>
-
-              {drawerMode === 'printer' ? (
-                <div style={{ display: 'grid', gap: 6 }}>
-                  <label style={{ fontSize: 13, opacity: 0.85 }}>Impresora que abrirá el cajón</label>
-                  <select
-                    value={drawerPrinterName}
-                    onChange={(e) => {
-                      setDrawerPrinterName(e.target.value);
-                      localStorage.setItem('cashdrawer_printer_name', e.target.value);
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button
+                    className={`chip ${drawerMode === 'printer' ? 'chip--active' : ''}`}
+                    onClick={() => {
+                      setDrawerMode('printer');
+                      localStorage.setItem('cashdrawer_mode', 'printer');
                     }}
                     disabled={drawerBusy}
                   >
-                    <option value="">Selecciona una impresora</option>
-                    {drawerPrinters.map((p: any) => (
-                      <option key={p.name} value={p.name}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    Por impresora
+                  </button>
+
+                  <button
+                    className={`chip ${drawerMode === 'serial' ? 'chip--active' : ''}`}
+                    onClick={() => {
+                      setDrawerMode('serial');
+                      localStorage.setItem('cashdrawer_mode', 'serial');
+                    }}
+                    disabled={drawerBusy}
+                  >
+                    Por puerto COM
+                  </button>
                 </div>
-              ) : (
-                <div style={{ display: 'grid', gap: 10 }}>
+
+                {drawerMode === 'printer' ? (
                   <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 13, opacity: 0.85 }}>Puerto COM</label>
+                    <label style={{ fontSize: 13, opacity: 0.85 }}>Impresora que abrirá el cajón</label>
                     <select
-                      value={drawerPort}
+                      value={drawerPrinterName}
                       onChange={(e) => {
-                        setDrawerPort(e.target.value);
-                        localStorage.setItem('cashdrawer_port', e.target.value);
+                        setDrawerPrinterName(e.target.value);
+                        localStorage.setItem('cashdrawer_printer_name', e.target.value);
                       }}
                       disabled={drawerBusy}
                     >
-                      <option value="">Selecciona un puerto</option>
-                      {drawerPorts.map((p: any) => (
-                        <option key={p.path} value={p.path}>
-                          {p.path} {p.friendlyName ? `- ${p.friendlyName}` : ''}
+                      <option value="">Selecciona una impresora</option>
+                      {drawerPrinters.map((p: any) => (
+                        <option key={p.name} value={p.name}>
+                          {p.name}
                         </option>
                       ))}
                     </select>
                   </div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <label style={{ fontSize: 13, opacity: 0.85 }}>Puerto COM</label>
+                      <select
+                        value={drawerPort}
+                        onChange={(e) => {
+                          setDrawerPort(e.target.value);
+                          localStorage.setItem('cashdrawer_port', e.target.value);
+                        }}
+                        disabled={drawerBusy}
+                      >
+                        <option value="">Selecciona un puerto</option>
+                        {drawerPorts.map((p: any) => (
+                          <option key={p.path} value={p.path}>
+                            {p.path} {p.friendlyName ? `- ${p.friendlyName}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 13, opacity: 0.85 }}>Baud rate</label>
-                    <input
-                      type="number"
-                      value={drawerBaudRate}
-                      onChange={(e) => {
-                        const v = Number(e.target.value || 9600);
-                        setDrawerBaudRate(v);
-                        localStorage.setItem('cashdrawer_baudrate', String(v));
-                      }}
-                      disabled={drawerBusy}
-                    />
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <label style={{ fontSize: 13, opacity: 0.85 }}>Baud rate</label>
+                      <input
+                        type="number"
+                        value={drawerBaudRate}
+                        onChange={(e) => {
+                          const v = Number(e.target.value || 9600);
+                          setDrawerBaudRate(v);
+                          localStorage.setItem('cashdrawer_baudrate', String(v));
+                        }}
+                        disabled={drawerBusy}
+                      />
+                    </div>
                   </div>
+                )}
+
+                <button className="btn btn--ghost" onClick={handleOpenDrawer} disabled={drawerBusy}>
+                  {drawerBusy ? 'Abriendo cajón...' : 'Abrir cajón'}
+                </button>
+
+                <div style={{ fontSize: 12, opacity: 0.72 }}>
+                  También puedes usar el atajo <b>F6</b>.
                 </div>
-              )}
-
-              <button className="btn btn--ghost" onClick={handleOpenDrawer} disabled={drawerBusy}>
-                {drawerBusy ? 'Abriendo cajón...' : 'Abrir cajón'}
-              </button>
-
-              <div style={{ fontSize: 12, opacity: 0.72 }}>
-                También puedes usar el atajo <b>F6</b>.
               </div>
-            </div>
 
               <div style={{ marginTop: 10, opacity: 0.75, fontSize: 13 }}>
                 Atajo rápido: presiona <b>F6</b> para abrir el cajón.
@@ -1377,6 +1374,50 @@ setMessage(
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal open={askPrint} onClose={() => setAskPrint(false)}>
+        <h3>¿Imprimir factura?</h3>
+
+        <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+          <button
+            className="btn"
+            onClick={async () => {
+              await printInvoice(pendingInvoice.html);
+
+              if (paymentMethod === 'EFECTIVO') {
+                await handleOpenDrawer();
+              }
+
+              clearCart();
+              setCustomerName('');
+              setCustomerId('');
+              setAskPrint(false);
+              setPendingInvoice(null);
+
+              setMessage(`Venta realizada e impresa. Factura #${pendingInvoice.invoiceNumber}`);
+              focusScanner();
+            }}
+          >
+            Imprimir
+          </button>
+
+          <button
+            className="btn btn--ghost"
+            onClick={async () => {
+              clearCart();
+              setCustomerName('');
+              setCustomerId('');
+              setAskPrint(false);
+              setPendingInvoice(null);
+
+              setMessage(`Venta realizada. Factura #${pendingInvoice.invoiceNumber}`);
+              focusScanner();
+            }}
+          >
+            No imprimir
+          </button>
+        </div>
       </Modal>
     </div>
   );

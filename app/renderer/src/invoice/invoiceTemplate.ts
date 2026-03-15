@@ -35,6 +35,8 @@ export type InvoiceData = {
   cashChange?: number;
   businessName?: string;
   businessLogoDataUrl?: string;
+  businessNit?: string;
+  businessPhone?: string;
 };
 
 export const buildInvoiceHtml = (data: InvoiceData): string => {
@@ -48,6 +50,8 @@ export const buildInvoiceHtml = (data: InvoiceData): string => {
   const showCash = received > 0 || change > 0;
 
   const businessName = safe(data.businessName || '');
+  const businessNit = safe(data.businessNit || '');
+  const businessPhone = safe(data.businessPhone || '');
   const logo = String(data.businessLogoDataUrl || '');
 
   const itemLines = items
@@ -189,6 +193,8 @@ export const buildInvoiceHtml = (data: InvoiceData): string => {
     ${logo ? `<div class="logoWrap"><img class="logo" src="${logo}" alt="logo" /></div>` : ''}
 
     ${businessName ? `<div class="center title">${businessName}</div>` : ''}
+    ${businessNit ? `<div class="center muted">NIT: ${businessNit}</div>` : ''}
+    ${businessPhone ? `<div class="center muted">Cel: ${businessPhone}</div>` : ''}
     <div class="center muted">Powered by <b>Sistetecni POS</b></div>
 
     <div class="hr"></div>

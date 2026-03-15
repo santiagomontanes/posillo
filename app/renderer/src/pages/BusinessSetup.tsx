@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { getConfig, setConfig } from '../services/config';
 
-const MAX_LOGO_BYTES = 450_000; // ~450KB (seguro para thermal + config.json)
+const MAX_LOGO_BYTES = 450_000; // ~450KB
 
 export const BusinessSetup = ({ onDone }: { onDone: () => void }) => {
   const [name, setName] = useState('');
+  const [nit, setNit] = useState('');
+  const [phone, setPhone] = useState('');
   const [logoDataUrl, setLogoDataUrl] = useState<string>('');
   const [error, setError] = useState('');
 
@@ -12,6 +14,8 @@ export const BusinessSetup = ({ onDone }: { onDone: () => void }) => {
     (async () => {
       const cfg = await getConfig();
       setName(cfg?.business?.name ?? '');
+      setNit(cfg?.business?.nit ?? '');
+      setPhone(cfg?.business?.phone ?? '');
       setLogoDataUrl(cfg?.business?.logoDataUrl ?? '');
     })();
   }, []);
@@ -38,6 +42,7 @@ export const BusinessSetup = ({ onDone }: { onDone: () => void }) => {
   const save = async () => {
     setError('');
     const businessName = name.trim();
+
     if (!businessName) {
       setError('El nombre del negocio es obligatorio.');
       return;
@@ -46,11 +51,12 @@ export const BusinessSetup = ({ onDone }: { onDone: () => void }) => {
     await setConfig({
       business: {
         name: businessName,
+        nit: nit.trim() || '',
+        phone: phone.trim() || '',
         logoDataUrl: logoDataUrl || '',
       },
     });
 
-    // en dev recarga, en prod reinicia por config:set.
     onDone();
   };
 
@@ -59,7 +65,7 @@ export const BusinessSetup = ({ onDone }: { onDone: () => void }) => {
       <div className="card grid" style={{ maxWidth: 520, margin: '20px auto' }}>
         <h1>Configurar negocio</h1>
         <div style={{ opacity: 0.85 }}>
-          Esto se mostrará en el POS y en la factura (sin quitar “Sistetecni POS”).
+          Esto se mostrará en el POS y en la factura.
         </div>
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -68,6 +74,24 @@ export const BusinessSetup = ({ onDone }: { onDone: () => void }) => {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Ej: Supermercado La 14"
+          />
+        </label>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <b>NIT (opcional)</b>
+          <input
+            value={nit}
+            onChange={(e) => setNit(e.target.value)}
+            placeholder="Ej: 901234567-8"
+          />
+        </label>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <b>Celular / teléfono (opcional)</b>
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Ej: 3001234567"
           />
         </label>
 
