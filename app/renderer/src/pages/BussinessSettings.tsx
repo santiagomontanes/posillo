@@ -17,7 +17,7 @@ export const BusinessSettings = ({ onDone }: { onDone?: () => void }) => {
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
-    (async () => {
+    (async () => { 
       const cfg = await window.api.config.get();
       const p = (cfg?.businessProfile ?? cfg?.business ?? {}) as BusinessProfile;
 

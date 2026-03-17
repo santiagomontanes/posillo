@@ -341,15 +341,17 @@ export async function deleteSuspendedSaleMySql(id: string): Promise<void> {
    HISTORIAL MYSQL
 ========================= */
 
+// FIX: usar pool.execute en lugar de pool.query para que LIMIT ? funcione
+// correctamente con mysql2, y ordenar por created_at DESC para mayor precisión
 export async function listRecentSalesMySql(limit = 30): Promise<any[]> {
   const pool = getMySqlPool();
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 30, 500));
 
-  const [rows] = await pool.query<any[]>(
+  const [rows] = await pool.execute<any[]>(
     `SELECT id, invoice_number, date, total, payment_method, customer_name, customer_id
      FROM sales
-     ORDER BY date DESC
-     LIMIT ?`,
-    [Number(limit)],
+     ORDER BY created_at DESC
+     LIMIT ${safeLimit}`,
   );
 
   return Array.isArray(rows) ? rows : [];

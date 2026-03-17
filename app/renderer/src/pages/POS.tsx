@@ -554,10 +554,6 @@ export const POS = ({ user }: { user: any }) => {
     return () => window.removeEventListener('keydown', handleShortcut);
   }, [drawerBusy, drawerMode, drawerPort, drawerBaudRate, drawerPrinterName]);
 
-  // FIX 1: invoiceNumber usa res.invoiceNumber (no saleDetail)
-  // FIX 2: se agrega setAskPrint(true) para abrir el modal
-  // FIX 3: se eliminan clearCart/setCustomerName/setCustomerId de aquí
-  //         (ya se ejecutan dentro del modal askPrint)
   const confirm = async (): Promise<void> => {
     if (isProcessing) return;
     if (cart.length === 0) return setMessage('El carrito está vacío.');
@@ -618,16 +614,12 @@ export const POS = ({ user }: { user: any }) => {
         })),
       });
 
-      // FIX 1: usar res.invoiceNumber
       setPendingInvoice({
         html,
         invoiceNumber: String(res.invoiceNumber ?? ''),
       });
 
-      // FIX 2: abrir modal de impresión
       setAskPrint(true);
-
-      // FIX 3: cajón y limpieza se manejan dentro del modal askPrint
 
     } catch (e: any) {
       setMessage(e?.message || 'No se pudo confirmar la venta.');
@@ -1405,13 +1397,25 @@ export const POS = ({ user }: { user: any }) => {
           <button
             className="btn btn--ghost"
             onClick={async () => {
+              const invoiceNum = pendingInvoice.invoiceNumber;
+
               clearCart();
               setCustomerName('');
               setCustomerId('');
               setAskPrint(false);
               setPendingInvoice(null);
 
-              setMessage(`Venta realizada. Factura #${pendingInvoice.invoiceNumber}`);
+              if (paymentMethod === 'EFECTIVO') {
+                await handleOpenDrawer();
+                // handleOpenDrawer ya setea el mensaje del cajón,
+                // lo complementamos con el número de factura
+                setMessage((prev: string) =>
+                  `Venta realizada. Factura #${invoiceNum} — ${prev}`,
+                );
+              } else {
+                setMessage(`Venta realizada. Factura #${invoiceNum}`);
+              }
+
               focusScanner();
             }}
           >

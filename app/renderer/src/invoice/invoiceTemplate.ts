@@ -142,6 +142,11 @@ export const buildInvoiceHtml = (data: InvoiceData): string => {
       font-size: 16px;
     }
 
+    .bold {
+      font-weight: 900;
+      font-size: 12px;
+    }
+
     .hr {
       border-top: 1px dashed #000;
       margin: 6px 0;
@@ -193,8 +198,8 @@ export const buildInvoiceHtml = (data: InvoiceData): string => {
     ${logo ? `<div class="logoWrap"><img class="logo" src="${logo}" alt="logo" /></div>` : ''}
 
     ${businessName ? `<div class="center title">${businessName}</div>` : ''}
-    ${businessNit ? `<div class="center muted">NIT: ${businessNit}</div>` : ''}
-    ${businessPhone ? `<div class="center muted">Cel: ${businessPhone}</div>` : ''}
+    ${businessNit ? `<div class="center"><b>NIT: ${businessNit}</b></div>` : ''}
+    ${businessPhone ? `<div class="center"><b>Cel: ${businessPhone}</b></div>` : ''}
     <div class="center muted">Powered by <b>Sistetecni POS</b></div>
 
     <div class="hr"></div>
