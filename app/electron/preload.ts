@@ -1,20 +1,22 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('api', {
-  
   installer: {
-  testConnection: (cfg: any)     => ipcRenderer.invoke('installer:test-connection', cfg),
-  check:          ()             => ipcRenderer.invoke('installer:check'),
-  run:            (payload: any) => ipcRenderer.invoke('installer:run', payload),
+    testConnection: (cfg: any) => ipcRenderer.invoke('installer:test-connection', cfg),
+    check: () => ipcRenderer.invoke('installer:check'),
+    run: (payload: any) => ipcRenderer.invoke('installer:run', payload),
   },
-autodetect: {
-  status: () => ipcRenderer.invoke('autodetect:status'),
-  reset:  () => ipcRenderer.invoke('autodetect:reset'),
+
+  autodetect: {
+    status: () => ipcRenderer.invoke('autodetect:status'),
+    reset: () => ipcRenderer.invoke('autodetect:reset'),
   },
-on: (channel: string, cb: (...args: any[]) => void) => {
-  ipcRenderer.on(channel, (_event, ...args) => cb(...args));
-  return () => ipcRenderer.removeAllListeners(channel);
+
+  on: (channel: string, cb: (...args: any[]) => void) => {
+    ipcRenderer.on(channel, (_event, ...args) => cb(...args));
+    return () => ipcRenderer.removeAllListeners(channel);
   },
+
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (cfg: any) => ipcRenderer.invoke('config:set', cfg),
@@ -26,13 +28,11 @@ on: (channel: string, cb: (...args: any[]) => void) => {
   },
 
   license: {
-  status: () => ipcRenderer.invoke('license:status'),
-  activate: (licenseKey: string) =>
-    ipcRenderer.invoke('license:activate', { licenseKey }),
-
-  // ✅ NUEVO: revalidar online (renueva gracia)
-  checkOnline: () => ipcRenderer.invoke('license:check-online'),
-},
+    status: () => ipcRenderer.invoke('license:status'),
+    activate: (licenseKey: string) =>
+      ipcRenderer.invoke('license:activate', { licenseKey }),
+    checkOnline: () => ipcRenderer.invoke('license:check-online'),
+  },
 
   mysql: {
     getConfig: () => ipcRenderer.invoke('mysql:config:get'),
@@ -40,6 +40,11 @@ on: (channel: string, cb: (...args: any[]) => void) => {
     clearConfig: () => ipcRenderer.invoke('mysql:config:clear'),
     test: () => ipcRenderer.invoke('mysql:test'),
     initSchema: () => ipcRenderer.invoke('mysql:init-schema'),
+  },
+
+  electronicBilling: {
+    get: () => ipcRenderer.invoke('electronicBilling:get'),
+    set: (data: any) => ipcRenderer.invoke('electronicBilling:set', data),
   },
 
   products: {
@@ -51,38 +56,43 @@ on: (channel: string, cb: (...args: any[]) => void) => {
     archive: (payload: unknown) => ipcRenderer.invoke('products:archive', payload),
   },
 
-sales: {
-  create: (payload: unknown) =>
-    ipcRenderer.invoke('sales:create', payload),
+  sales: {
+    create: (payload: unknown) =>
+      ipcRenderer.invoke('sales:create', payload),
 
-  /* suspender venta */
-  suspend: (payload: unknown) =>
-    ipcRenderer.invoke('sales:suspend', payload),
+    suspend: (payload: unknown) =>
+      ipcRenderer.invoke('sales:suspend', payload),
 
-  /* ventas suspendidas */
-  listSuspended: (payload: unknown) =>
-    ipcRenderer.invoke('sales:suspended-list', payload),
+    listSuspended: (payload: unknown) =>
+      ipcRenderer.invoke('sales:suspended-list', payload),
 
-  getSuspended: (payload: unknown) =>
-    ipcRenderer.invoke('sales:suspended-get', payload),
+    getSuspended: (payload: unknown) =>
+      ipcRenderer.invoke('sales:suspended-get', payload),
 
-  deleteSuspended: (payload: unknown) =>
-    ipcRenderer.invoke('sales:suspended-delete', payload),
+    deleteSuspended: (payload: unknown) =>
+      ipcRenderer.invoke('sales:suspended-delete', payload),
 
-  /* historial */
-  listRecent: (payload: unknown) =>
-    ipcRenderer.invoke('sales:recent', payload),
+    listRecent: (payload: unknown) =>
+      ipcRenderer.invoke('sales:recent', payload),
 
-  /* detalle venta */
-  getDetail: (payload: unknown) =>
-    ipcRenderer.invoke('sales:detail', payload),
+    getDetail: (payload: unknown) =>
+      ipcRenderer.invoke('sales:detail', payload),
 
-  return: (payload: unknown) => ipcRenderer.invoke('sales:return', payload),
+    return: (payload: unknown) =>
+      ipcRenderer.invoke('sales:return', payload),
 
-  /* imprimir */
-  printInvoice: (payload: unknown) =>
-    ipcRenderer.invoke('sales:print-invoice', payload),
-},
+    printInvoice: (payload: unknown) =>
+      ipcRenderer.invoke('sales:print-invoice', payload),
+
+    createCreditNote: (payload: unknown) =>
+      ipcRenderer.invoke('sales:credit-note:create', payload),
+
+    createDebitNote: (payload: unknown) =>
+      ipcRenderer.invoke('sales:debit-note:create', payload),
+
+    listElectronicEvents: (payload: unknown) =>
+      ipcRenderer.invoke('sales:electronic-events', payload),
+  },
 
   expenses: {
     add: (payload: unknown) => ipcRenderer.invoke('expenses:add', payload),
@@ -112,8 +122,6 @@ sales: {
     listBasic: (payload: unknown) => ipcRenderer.invoke('users:list-basic', payload),
     create: (payload: unknown) => ipcRenderer.invoke('users:create', payload),
     resetPassword: (payload: unknown) => ipcRenderer.invoke('users:reset-password', payload),
-
-    // ✅ cambio obligatorio de contraseña
     changePassword: (payload: unknown) =>
       ipcRenderer.invoke('users:change-password', payload),
   },
@@ -127,9 +135,10 @@ sales: {
     export: (payload: unknown) => ipcRenderer.invoke('backups:export', payload),
     restore: (payload: unknown) => ipcRenderer.invoke('backups:restore', payload),
   },
+
   cashdrawer: {
-  listPorts: () => ipcRenderer.invoke('cashdrawer:list-ports'),
-  listPrinters: () => ipcRenderer.invoke('cashdrawer:list-printers'),
-  open: (payload: unknown) => ipcRenderer.invoke('cashdrawer:open', payload),
+    listPorts: () => ipcRenderer.invoke('cashdrawer:list-ports'),
+    listPrinters: () => ipcRenderer.invoke('cashdrawer:list-printers'),
+    open: (payload: unknown) => ipcRenderer.invoke('cashdrawer:open', payload),
   },
 });

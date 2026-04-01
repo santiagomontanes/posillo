@@ -4,8 +4,6 @@ import { mysqlExec, mysqlQueryOne } from '../mysql';
 import bcrypt from 'bcryptjs';
 import { v4 as uuid } from 'uuid';
 
-const nowIso = () => new Date().toISOString();
-
 async function getColumnInfo(table: string, column: string): Promise<{ dataType?: string; columnType?: string } | null> {
   const cfg = readMySqlConfig();
   if (!cfg?.database) throw new Error('MySQL config no encontrada');
@@ -118,13 +116,13 @@ async function ensureDateTimeColumn(table: string, column: string): Promise<void
     await mysqlExec(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` DATETIME NOT NULL`);
   }
   if (
-    ['sales', 'expenses', 'products', 'users', 'audit_logs', 'suppliers', 'purchases', 'sale_returns', 'suspended_sales'].includes(table) &&
+    ['sales', 'expenses', 'products', 'users', 'audit_logs', 'suppliers', 'purchases', 'sale_returns', 'suspended_sales', 'electronic_billing_settings', 'electronic_invoice_events'].includes(table) &&
     column === 'created_at'
   ) {
     await mysqlExec(`UPDATE \`${table}\` SET \`${column}\` = NOW() WHERE \`${column}\` IS NULL`);
     await mysqlExec(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` DATETIME NOT NULL`);
   }
-  if (['products', 'suppliers', 'suspended_sales'].includes(table) && column === 'updated_at') {
+  if (['products', 'suppliers', 'suspended_sales', 'electronic_billing_settings', 'electronic_invoice_events'].includes(table) && column === 'updated_at') {
     await mysqlExec(`UPDATE \`${table}\` SET \`${column}\` = NOW() WHERE \`${column}\` IS NULL`);
     await mysqlExec(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` DATETIME NOT NULL`);
   }
@@ -286,9 +284,6 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
     );
   `);
 
-  /* =========================
-     NUEVO: VENTAS SUSPENDIDAS
-  ========================= */
   await mysqlExec(`
     CREATE TABLE IF NOT EXISTS suspended_sales (
       id VARCHAR(36) PRIMARY KEY,
@@ -325,9 +320,6 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
     );
   `);
 
-  /* =========================
-     NUEVO: DEVOLUCIONES
-  ========================= */
   await mysqlExec(`
     CREATE TABLE IF NOT EXISTS sale_returns (
       id VARCHAR(36) PRIMARY KEY,
@@ -356,9 +348,6 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
     );
   `);
 
-  /* =========================
-     NUEVO: PROVEEDORES
-  ========================= */
   await mysqlExec(`
     CREATE TABLE IF NOT EXISTS suppliers (
       id VARCHAR(36) PRIMARY KEY,
@@ -375,9 +364,6 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
     );
   `);
 
-  /* =========================
-     NUEVO: COMPRAS
-  ========================= */
   await mysqlExec(`
     CREATE TABLE IF NOT EXISTS purchases (
       id VARCHAR(36) PRIMARY KEY,
@@ -407,14 +393,80 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
     );
   `);
 
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS invoice_counters (
+      \`year\` INT NOT NULL PRIMARY KEY,
+      last_number INT NOT NULL DEFAULT 0,
+      seq BIGINT NOT NULL DEFAULT 0
+    );
+  `);
+
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS electronic_billing_settings (
+      id VARCHAR(36) PRIMARY KEY,
+      enabled TINYINT(1) NOT NULL DEFAULT 0,
+      provider VARCHAR(30) NOT NULL DEFAULT 'factus',
+      environment VARCHAR(20) NOT NULL DEFAULT 'sandbox',
+      base_url VARCHAR(255) NOT NULL,
+      username VARCHAR(255) NULL,
+      password VARCHAR(255) NULL,
+      client_id VARCHAR(255) NULL,
+      client_secret VARCHAR(255) NULL,
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME NOT NULL
+    );
+  `);
+
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS electronic_invoice_events (
+      id VARCHAR(36) PRIMARY KEY,
+      sale_id VARCHAR(36) NOT NULL,
+      related_sale_id VARCHAR(36) NULL,
+      event_type VARCHAR(20) NOT NULL,
+      provider VARCHAR(30) NOT NULL DEFAULT 'factus',
+      status VARCHAR(30) NULL,
+      provider_document_id BIGINT NULL,
+      provider_number VARCHAR(120) NULL,
+      provider_public_url TEXT NULL,
+      cufe VARCHAR(255) NULL,
+      related_provider_document_id BIGINT NULL,
+      related_provider_number VARCHAR(120) NULL,
+      reason_code VARCHAR(20) NULL,
+      reason_text TEXT NULL,
+      amount INT NULL,
+      payload_json LONGTEXT NULL,
+      response_json LONGTEXT NULL,
+      error_text TEXT NULL,
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME NOT NULL,
+      INDEX idx_eie_sale_id (sale_id),
+      INDEX idx_eie_related_sale_id (related_sale_id),
+      INDEX idx_eie_event_type (event_type),
+      INDEX idx_eie_created_at (created_at)
+    );
+  `);
+
   await addColumnIfMissing('products', 'name', '`name` VARCHAR(255) NULL AFTER `id`');
   await addColumnIfMissing('products', 'category', '`category` VARCHAR(120) NULL AFTER `name`');
   await addColumnIfMissing('products', 'sku', '`sku` VARCHAR(64) NULL AFTER `category`');
   await addColumnIfMissing('products', 'barcode', '`barcode` VARCHAR(64) NULL AFTER `sku`');
-  await addColumnIfMissing('products', 'unit', "`unit` VARCHAR(20) NOT NULL DEFAULT 'UND' AFTER \`barcode\`");
+  await addColumnIfMissing('products', 'unit', "`unit` VARCHAR(20) NOT NULL DEFAULT 'UND' AFTER `barcode`");
   await addColumnIfMissing('products', 'min_stock', '`min_stock` INT NOT NULL DEFAULT 0 AFTER `stock`');
-  await addColumnIfMissing('products', 'status', "`status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' AFTER \`active\`");
+  await addColumnIfMissing('products', 'status', "`status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' AFTER `active`");
   await addColumnIfMissing('products', 'location', '`location` VARCHAR(120) NULL AFTER `notes`');
+
+  await addColumnIfMissing('sales', 'customer_email', '`customer_email` VARCHAR(255) NULL AFTER `customer_id`');
+  await addColumnIfMissing('sales', 'customer_phone', '`customer_phone` VARCHAR(60) NULL AFTER `customer_email`');
+  await addColumnIfMissing('sales', 'customer_address', '`customer_address` VARCHAR(255) NULL AFTER `customer_phone`');
+  await addColumnIfMissing('sales', 'electronic_invoice_requested', '`electronic_invoice_requested` TINYINT(1) NOT NULL DEFAULT 0 AFTER `customer_address`');
+  await addColumnIfMissing('sales', 'factus_status', '`factus_status` VARCHAR(30) NULL AFTER `electronic_invoice_requested`');
+  await addColumnIfMissing('sales', 'factus_bill_id', '`factus_bill_id` BIGINT NULL AFTER `factus_status`');
+  await addColumnIfMissing('sales', 'factus_bill_number', '`factus_bill_number` VARCHAR(120) NULL AFTER `factus_bill_id`');
+  await addColumnIfMissing('sales', 'factus_public_url', '`factus_public_url` TEXT NULL AFTER `factus_bill_number`');
+  await addColumnIfMissing('sales', 'factus_cufe', '`factus_cufe` VARCHAR(255) NULL AFTER `factus_public_url`');
+  await addColumnIfMissing('sales', 'factus_validated_at', '`factus_validated_at` VARCHAR(60) NULL AFTER `factus_cufe`');
+  await addColumnIfMissing('sales', 'factus_error', '`factus_error` TEXT NULL AFTER `factus_validated_at`');
+  await addColumnIfMissing('sales', 'factus_raw_json', '`factus_raw_json` LONGTEXT NULL AFTER `factus_error`');
 
   await addIndexIfMissing('products', 'idx_products_barcode', 'INDEX idx_products_barcode (`barcode`)');
   await addIndexIfMissing('products', 'idx_products_sku', 'INDEX idx_products_sku (`sku`)');
@@ -439,6 +491,10 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
   await ensureDateTimeColumn('sale_returns', 'created_at');
   await ensureDateTimeColumn('suspended_sales', 'created_at');
   await ensureDateTimeColumn('suspended_sales', 'updated_at');
+  await ensureDateTimeColumn('electronic_billing_settings', 'created_at');
+  await ensureDateTimeColumn('electronic_billing_settings', 'updated_at');
+  await ensureDateTimeColumn('electronic_invoice_events', 'created_at');
+  await ensureDateTimeColumn('electronic_invoice_events', 'updated_at');
 
   await seedAdminIfMissing();
 

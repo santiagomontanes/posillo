@@ -28,6 +28,14 @@ export const Settings = ({ role }: { role: 'ADMIN' | 'SUPERVISOR' | 'SELLER' }) 
   const [password, setPassword] = useState('');
   const [database, setDatabase] = useState('sistetecni_pos');
 
+  // 🔥 FE STATES
+  const [feEnabled, setFeEnabled] = useState(false);
+  const [feBaseUrl, setFeBaseUrl] = useState('');
+  const [feUser, setFeUser] = useState('');
+  const [fePass, setFePass] = useState('');
+  const [feClientId, setFeClientId] = useState('');
+  const [feClientSecret, setFeClientSecret] = useState('');
+
   const [msg, setMsg] = useState<string>('');
 
   useEffect(() => {
@@ -41,6 +49,18 @@ export const Settings = ({ role }: { role: 'ADMIN' | 'SUPERVISOR' | 'SELLER' }) 
         setUser(cfg?.mysql?.user ?? 'root');
         setPassword(cfg?.mysql?.password ?? '');
         setDatabase(cfg?.mysql?.database ?? 'sistetecni_pos');
+
+        // 🔥 CARGAR FE
+        const fe = await window.api.electronicBilling.get();
+
+        if (fe) {
+          setFeEnabled(!!fe.enabled);
+          setFeBaseUrl(fe.base_url ?? '');
+          setFeUser(fe.username ?? '');
+          setFePass(fe.password ?? '');
+          setFeClientId(fe.client_id ?? '');
+          setFeClientSecret(fe.client_secret ?? '');
+        }
       } catch (e: any) {
         setMsg(e?.message || 'No se pudo cargar la configuración');
       } finally {
@@ -70,7 +90,23 @@ export const Settings = ({ role }: { role: 'ADMIN' | 'SUPERVISOR' | 'SELLER' }) 
             }
           : { dbMode: 'sqlite' };
 
+      // 🔥 GUARDAR DB CONFIG
       await window.api.config.set({ ...getAuthContext(), ...cfg });
+
+      // 🔥 GUARDAR FE CONFIG
+      if (dbMode === 'mysql') {
+        await window.api.electronicBilling.set({
+          enabled: feEnabled ? 1 : 0,
+          provider: 'factus',
+          environment: 'sandbox',
+          baseUrl: feBaseUrl,
+          username: feUser,
+          password: fePass,
+          clientId: feClientId,
+          clientSecret: feClientSecret,
+        });
+      }
+
       setMsg('Guardado. Reiniciando...');
     } catch (e: any) {
       setMsg(e?.message || 'No se pudo guardar');
@@ -86,26 +122,17 @@ export const Settings = ({ role }: { role: 'ADMIN' | 'SUPERVISOR' | 'SELLER' }) 
           <div className="dashboard__eyebrow">Configuración</div>
           <h2 className="dashboard__title">Parámetros del sistema</h2>
           <p className="dashboard__text">
-            Define el modo de base de datos y los datos necesarios para operar en local o multicaja.
+            Define el modo de base de datos y la facturación electrónica.
           </p>
         </div>
       </div>
 
+      {/* ================= DB ================= */}
       <div className="card">
         <div className="dashboard__section-title">Base de datos</div>
 
         <div style={{ display: 'grid', gap: 12 }}>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: 14,
-              borderRadius: 14,
-              background: 'rgba(255,255,255,.03)',
-              border: '1px solid rgba(255,255,255,.06)',
-            }}
-          >
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <input
               type="radio"
               checked={dbMode === 'sqlite'}
@@ -114,17 +141,7 @@ export const Settings = ({ role }: { role: 'ADMIN' | 'SUPERVISOR' | 'SELLER' }) 
             <span>SQLite (modo local)</span>
           </label>
 
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: 14,
-              borderRadius: 14,
-              background: 'rgba(255,255,255,.03)',
-              border: '1px solid rgba(255,255,255,.06)',
-            }}
-          >
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <input
               type="radio"
               checked={dbMode === 'mysql'}
@@ -136,34 +153,40 @@ export const Settings = ({ role }: { role: 'ADMIN' | 'SUPERVISOR' | 'SELLER' }) 
 
         {dbMode === 'mysql' && (
           <div className="grid grid-2" style={{ marginTop: 16 }}>
-            <label style={{ display: 'grid', gap: 8 }}>
-              <span style={{ color: 'var(--muted)', fontWeight: 700 }}>Host</span>
-              <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="192.168.1.10" />
-            </label>
-
-            <label style={{ display: 'grid', gap: 8 }}>
-              <span style={{ color: 'var(--muted)', fontWeight: 700 }}>Base de datos</span>
-              <input value={database} onChange={(e) => setDatabase(e.target.value)} placeholder="sistetecni_pos" />
-            </label>
-
-            <label style={{ display: 'grid', gap: 8 }}>
-              <span style={{ color: 'var(--muted)', fontWeight: 700 }}>Usuario</span>
-              <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="root" />
-            </label>
-
-            <label style={{ display: 'grid', gap: 8 }}>
-              <span style={{ color: 'var(--muted)', fontWeight: 700 }}>Contraseña</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="123456"
-              />
-            </label>
+            <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="Host" />
+            <input value={database} onChange={(e) => setDatabase(e.target.value)} placeholder="DB" />
+            <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="User" />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+        {/* ================= FE ================= */}
+        {dbMode === 'mysql' && (
+          <div style={{ marginTop: 20 }}>
+            <div className="dashboard__section-title">Facturación electrónica</div>
+
+            <label>
+              <input
+                type="checkbox"
+                checked={feEnabled}
+                onChange={(e) => setFeEnabled(e.target.checked)}
+              />
+              Habilitar Facturación Electrónica
+            </label>
+
+            {feEnabled && (
+              <div className="grid grid-2" style={{ marginTop: 10 }}>
+                <input placeholder="Base URL" value={feBaseUrl} onChange={(e) => setFeBaseUrl(e.target.value)} />
+                <input placeholder="Usuario" value={feUser} onChange={(e) => setFeUser(e.target.value)} />
+                <input type="password" placeholder="Password" value={fePass} onChange={(e) => setFePass(e.target.value)} />
+                <input placeholder="Client ID" value={feClientId} onChange={(e) => setFeClientId(e.target.value)} />
+                <input placeholder="Client Secret" value={feClientSecret} onChange={(e) => setFeClientSecret(e.target.value)} />
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
           <button onClick={save}>Guardar y reiniciar</button>
 
           <button
@@ -174,7 +197,6 @@ export const Settings = ({ role }: { role: 'ADMIN' | 'SUPERVISOR' | 'SELLER' }) 
                 alert('Esquema creado correctamente.');
               } catch (err) {
                 alert('Error creando el esquema.');
-                console.error(err);
               }
             }}
           >
@@ -182,20 +204,7 @@ export const Settings = ({ role }: { role: 'ADMIN' | 'SUPERVISOR' | 'SELLER' }) 
           </button>
         </div>
 
-        {msg && (
-          <div
-            style={{
-              marginTop: 14,
-              padding: 12,
-              borderRadius: 12,
-              background: 'rgba(255,255,255,.03)',
-              border: '1px solid rgba(255,255,255,.06)',
-              opacity: 0.95,
-            }}
-          >
-            {msg}
-          </div>
-        )}
+        {msg && <div style={{ marginTop: 10 }}>{msg}</div>}
       </div>
     </div>
   );

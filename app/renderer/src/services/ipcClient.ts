@@ -9,6 +9,56 @@ const api = window.api ?? {};
 export const ipc = {
   ...api,
 
+  sales: {
+    create: async (payload: unknown) => {
+      return await api.sales.create(payload);
+    },
+
+    suspend: async (payload: unknown) => {
+      return await api.sales.suspend(payload);
+    },
+
+    listSuspended: async (payload: unknown) => {
+      return await api.sales.listSuspended(payload);
+    },
+
+    getSuspended: async (payload: unknown) => {
+      return await api.sales.getSuspended(payload);
+    },
+
+    deleteSuspended: async (payload: unknown) => {
+      return await api.sales.deleteSuspended(payload);
+    },
+
+    listRecent: async (payload: unknown) => {
+      return await api.sales.listRecent(payload);
+    },
+
+    getDetail: async (payload: unknown) => {
+      return await api.sales.getDetail(payload);
+    },
+
+    return: async (payload: unknown) => {
+      return await api.sales.return(payload);
+    },
+
+    printInvoice: async (payload: unknown) => {
+      return await api.sales.printInvoice(payload);
+    },
+
+    createCreditNote: async (payload: unknown) => {
+      return await api.sales.createCreditNote(payload);
+    },
+
+    createDebitNote: async (payload: unknown) => {
+      return await api.sales.createDebitNote(payload);
+    },
+
+    listElectronicEvents: async (payload: unknown) => {
+      return await api.sales.listElectronicEvents(payload);
+    },
+  },
+
   cashdrawer: {
     listPorts: async (): Promise<any[]> => {
       try {

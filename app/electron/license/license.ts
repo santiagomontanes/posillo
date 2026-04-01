@@ -173,18 +173,21 @@ const validateAgainstSupabase = async (
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || !data?.ok) {
-      return {
-        ok: false,
-        message: data?.message || data?.error || `HTTP_${res.status}`,
-      };
-    }
+  clearLicenseState();
+
+  return {
+    ok: false,
+    message: data?.message || data?.error || `HTTP_${res.status}`,
+  };
+
+}
 
     saveLicenseState({
       licenseKey,
       plan: data.plan,
       expiresAt: data.expiresAt ?? null,
       lastCheckAt: data.serverTime ?? new Date().toISOString(),
-      graceDays: Number(data.graceDays ?? 7),
+      graceDays: Number(data.graceDays ?? 0),
     });
 
     return { ok: true };

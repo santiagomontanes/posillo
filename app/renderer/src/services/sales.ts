@@ -25,7 +25,25 @@ export const listRecentSales = (limit = 30) =>
 export const getSaleDetail = (id: string) =>
   ipc.sales.getDetail({ ...getAuthContext(), id });
 
-
-
 export const returnSale = (data: any) =>
   ipc.sales.return({ ...getAuthContext(), ...data });
+
+export const createCreditNote = (data: {
+  saleId: string;
+  reasonCode: string;
+  reasonText?: string;
+  mode?: 'full' | 'partial';
+  amount?: number;
+}) =>
+  ipc.sales.createCreditNote({ ...getAuthContext(), ...data });
+
+export const createDebitNote = (data: {
+  saleId: string;
+  reasonCode: string;
+  reasonText?: string;
+  amount: number;
+}) =>
+  ipc.sales.createDebitNote({ ...getAuthContext(), ...data });
+
+export const listElectronicEvents = (saleId: string) =>
+  ipc.sales.listElectronicEvents({ ...getAuthContext(), saleId });

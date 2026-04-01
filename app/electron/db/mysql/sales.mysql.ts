@@ -72,11 +72,80 @@ async function ensureExtraSalesTablesMySql(): Promise<void> {
   `);
 }
 
+async function ensureElectronicInvoiceEventsTableMySql(): Promise<void> {
+  const pool = getMySqlPool();
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS electronic_invoice_events (
+      id VARCHAR(36) PRIMARY KEY,
+      sale_id VARCHAR(36) NOT NULL,
+      related_sale_id VARCHAR(36) NULL,
+      event_type VARCHAR(20) NOT NULL,
+      provider VARCHAR(30) NOT NULL DEFAULT 'factus',
+      status VARCHAR(30) NULL,
+      provider_document_id BIGINT NULL,
+      provider_number VARCHAR(120) NULL,
+      provider_public_url TEXT NULL,
+      cufe VARCHAR(255) NULL,
+      related_provider_document_id BIGINT NULL,
+      related_provider_number VARCHAR(120) NULL,
+      reason_code VARCHAR(20) NULL,
+      reason_text TEXT NULL,
+      amount INT NULL,
+      payload_json LONGTEXT NULL,
+      response_json LONGTEXT NULL,
+      error_text TEXT NULL,
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME NOT NULL,
+      INDEX idx_eie_sale_id (sale_id),
+      INDEX idx_eie_related_sale_id (related_sale_id),
+      INDEX idx_eie_event_type (event_type),
+      INDEX idx_eie_created_at (created_at)
+    )
+  `);
+}
+
+async function ensureSalesFactusColumnsMySql(): Promise<void> {
+  const pool = getMySqlPool();
+
+  const addColumnIfMissing = async (columnName: string, definition: string) => {
+    const [rows] = await pool.query<any[]>(
+      `
+      SELECT COUNT(*) AS total
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'sales'
+        AND COLUMN_NAME = ?
+      `,
+      [columnName],
+    );
+
+    const exists = Number(rows?.[0]?.total ?? 0) > 0;
+    if (exists) return;
+
+    await pool.execute(`ALTER TABLE sales ADD COLUMN ${definition}`);
+  };
+
+  await addColumnIfMissing('customer_email', 'customer_email VARCHAR(255) NULL');
+  await addColumnIfMissing('customer_phone', 'customer_phone VARCHAR(60) NULL');
+  await addColumnIfMissing('customer_address', 'customer_address VARCHAR(255) NULL');
+  await addColumnIfMissing('electronic_invoice_requested', 'electronic_invoice_requested TINYINT(1) NOT NULL DEFAULT 0');
+  await addColumnIfMissing('factus_status', 'factus_status VARCHAR(30) NULL');
+  await addColumnIfMissing('factus_bill_id', 'factus_bill_id BIGINT NULL');
+  await addColumnIfMissing('factus_bill_number', 'factus_bill_number VARCHAR(120) NULL');
+  await addColumnIfMissing('factus_public_url', 'factus_public_url TEXT NULL');
+  await addColumnIfMissing('factus_cufe', 'factus_cufe VARCHAR(255) NULL');
+  await addColumnIfMissing('factus_validated_at', 'factus_validated_at VARCHAR(60) NULL');
+  await addColumnIfMissing('factus_error', 'factus_error TEXT NULL');
+  await addColumnIfMissing('factus_raw_json', 'factus_raw_json LONGTEXT NULL');
+}
+
 export async function createSaleMySql(input: any): Promise<{ saleId: string; invoiceNumber: string }> {
   const pool = getMySqlPool();
   const conn = await pool.getConnection();
 
   try {
+    await ensureSalesFactusColumnsMySql();
     await conn.beginTransaction();
 
     const saleId = uuid();
@@ -85,17 +154,28 @@ export async function createSaleMySql(input: any): Promise<{ saleId: string; inv
 
     const invoiceNumber = await nextInvoiceNumberMySql(conn, year);
 
-    console.log('[SALE MYSQL]', {
-      now,
-      paymentMethod: String(input.paymentMethod ?? '').trim().toUpperCase(),
-      total: Number(input.total ?? 0),
-    });
-
     await conn.execute(
       `INSERT INTO sales
-        (id, invoice_number, date, user_id, payment_method, subtotal, discount, total, customer_name, customer_id, created_at)
+        (
+          id,
+          invoice_number,
+          date,
+          user_id,
+          payment_method,
+          subtotal,
+          discount,
+          total,
+          customer_name,
+          customer_id,
+          customer_email,
+          customer_phone,
+          customer_address,
+          electronic_invoice_requested,
+          factus_status,
+          created_at
+        )
        VALUES
-        (?,  ?,            ?,    ?,       ?,              ?,        ?,        ?,     ?,            ?,           ?)`,
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         saleId,
         invoiceNumber,
@@ -107,6 +187,11 @@ export async function createSaleMySql(input: any): Promise<{ saleId: string; inv
         Number(input.total ?? 0),
         input.customerName ?? null,
         input.customerId ?? null,
+        input.customerEmail ?? null,
+        input.customerPhone ?? null,
+        input.customerAddress ?? null,
+        input.generateElectronicInvoice ? 1 : 0,
+        input.generateElectronicInvoice ? 'PENDING' : null,
         now,
       ],
     );
@@ -131,7 +216,7 @@ export async function createSaleMySql(input: any): Promise<{ saleId: string; inv
           `INSERT INTO sale_items
             (id, sale_id, product_id, qty, unit_price, line_total, description, unit_cost)
            VALUES
-            (?,  ?,       NULL,      ?,   ?,          ?,          ?,          ?)`,
+            (?, ?, NULL, ?, ?, ?, ?, ?)`,
           [uuid(), saleId, qty, unitPrice, lineTotal, description, unitCost],
         );
 
@@ -163,7 +248,7 @@ export async function createSaleMySql(input: any): Promise<{ saleId: string; inv
         `INSERT INTO sale_items
           (id, sale_id, product_id, qty, unit_price, line_total, description, unit_cost)
          VALUES
-          (?,  ?,       ?,          ?,   ?,          ?,          ?,           ?)`,
+          (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuid(),
           saleId,
@@ -196,9 +281,165 @@ export async function createSaleMySql(input: any): Promise<{ saleId: string; inv
   }
 }
 
-/* =========================
-   VENTAS SUSPENDIDAS MYSQL
-========================= */
+export async function updateSaleElectronicInvoiceMySql(data: {
+  saleId: string;
+  factusStatus: string | null;
+  factusBillId?: number | null;
+  factusBillNumber?: string | null;
+  factusPublicUrl?: string | null;
+  factusCufe?: string | null;
+  factusValidatedAt?: string | null;
+  factusError?: string | null;
+  factusRawJson?: string | null;
+}): Promise<void> {
+  const pool = getMySqlPool();
+
+  await ensureSalesFactusColumnsMySql();
+
+  await pool.execute(
+    `UPDATE sales
+     SET
+       factus_status = ?,
+       factus_bill_id = ?,
+       factus_bill_number = ?,
+       factus_public_url = ?,
+       factus_cufe = ?,
+       factus_validated_at = ?,
+       factus_error = ?,
+       factus_raw_json = ?
+     WHERE id = ?`,
+    [
+      data.factusStatus ?? null,
+      data.factusBillId ?? null,
+      data.factusBillNumber ?? null,
+      data.factusPublicUrl ?? null,
+      data.factusCufe ?? null,
+      data.factusValidatedAt ?? null,
+      data.factusError ?? null,
+      data.factusRawJson ?? null,
+      data.saleId,
+    ],
+  );
+}
+
+export async function createElectronicInvoiceEventMySql(input: {
+  saleId: string;
+  relatedSaleId?: string | null;
+  eventType: 'CREDIT_NOTE' | 'DEBIT_NOTE';
+  provider?: string;
+  status?: string | null;
+  providerDocumentId?: number | null;
+  providerNumber?: string | null;
+  providerPublicUrl?: string | null;
+  cufe?: string | null;
+  relatedProviderDocumentId?: number | null;
+  relatedProviderNumber?: string | null;
+  reasonCode?: string | null;
+  reasonText?: string | null;
+  amount?: number | null;
+  payloadJson?: string | null;
+  responseJson?: string | null;
+  errorText?: string | null;
+}): Promise<string> {
+  await ensureElectronicInvoiceEventsTableMySql();
+
+  const pool = getMySqlPool();
+  const id = uuid();
+  const now = toLocalMySqlDateTime(new Date());
+
+  await pool.execute(
+    `INSERT INTO electronic_invoice_events
+      (
+        id, sale_id, related_sale_id, event_type, provider, status,
+        provider_document_id, provider_number, provider_public_url, cufe,
+        related_provider_document_id, related_provider_number,
+        reason_code, reason_text, amount, payload_json, response_json,
+        error_text, created_at, updated_at
+      )
+     VALUES
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      input.saleId,
+      input.relatedSaleId ?? null,
+      input.eventType,
+      input.provider ?? 'factus',
+      input.status ?? null,
+      input.providerDocumentId ?? null,
+      input.providerNumber ?? null,
+      input.providerPublicUrl ?? null,
+      input.cufe ?? null,
+      input.relatedProviderDocumentId ?? null,
+      input.relatedProviderNumber ?? null,
+      input.reasonCode ?? null,
+      input.reasonText ?? null,
+      input.amount ?? null,
+      input.payloadJson ?? null,
+      input.responseJson ?? null,
+      input.errorText ?? null,
+      now,
+      now,
+    ],
+  );
+
+  return id;
+}
+
+export async function updateElectronicInvoiceEventMySql(input: {
+  id: string;
+  status?: string | null;
+  providerDocumentId?: number | null;
+  providerNumber?: string | null;
+  providerPublicUrl?: string | null;
+  cufe?: string | null;
+  responseJson?: string | null;
+  errorText?: string | null;
+}): Promise<void> {
+  await ensureElectronicInvoiceEventsTableMySql();
+
+  const pool = getMySqlPool();
+  const now = toLocalMySqlDateTime(new Date());
+
+  await pool.execute(
+    `UPDATE electronic_invoice_events
+     SET
+       status = ?,
+       provider_document_id = ?,
+       provider_number = ?,
+       provider_public_url = ?,
+       cufe = ?,
+       response_json = ?,
+       error_text = ?,
+       updated_at = ?
+     WHERE id = ?`,
+    [
+      input.status ?? null,
+      input.providerDocumentId ?? null,
+      input.providerNumber ?? null,
+      input.providerPublicUrl ?? null,
+      input.cufe ?? null,
+      input.responseJson ?? null,
+      input.errorText ?? null,
+      now,
+      input.id,
+    ],
+  );
+}
+
+export async function listElectronicInvoiceEventsBySaleMySql(saleId: string): Promise<any[]> {
+  await ensureElectronicInvoiceEventsTableMySql();
+
+  const pool = getMySqlPool();
+  const [rows] = await pool.query<any[]>(
+    `SELECT *
+     FROM electronic_invoice_events
+     WHERE sale_id = ? OR related_sale_id = ?
+     ORDER BY created_at DESC`,
+    [saleId, saleId],
+  );
+
+  return Array.isArray(rows) ? rows : [];
+}
 
 export async function suspendSaleMySql(data: any): Promise<string> {
   await ensureExtraSalesTablesMySql();
@@ -337,18 +578,22 @@ export async function deleteSuspendedSaleMySql(id: string): Promise<void> {
   }
 }
 
-/* =========================
-   HISTORIAL MYSQL
-========================= */
-
-// FIX: usar pool.execute en lugar de pool.query para que LIMIT ? funcione
-// correctamente con mysql2, y ordenar por created_at DESC para mayor precisión
 export async function listRecentSalesMySql(limit = 30): Promise<any[]> {
   const pool = getMySqlPool();
   const safeLimit = Math.max(1, Math.min(Number(limit) || 30, 500));
 
   const [rows] = await pool.execute<any[]>(
-    `SELECT id, invoice_number, date, total, payment_method, customer_name, customer_id
+    `SELECT
+        id,
+        invoice_number,
+        date,
+        total,
+        payment_method,
+        customer_name,
+        customer_id,
+        factus_status,
+        factus_bill_number,
+        factus_public_url
      FROM sales
      ORDER BY created_at DESC
      LIMIT ${safeLimit}`,
@@ -379,15 +624,20 @@ export async function getSaleDetailMySql(saleId: string): Promise<any | null> {
     [saleId],
   );
 
+  const [eventsRows] = await pool.query<any[]>(
+    `SELECT *
+     FROM electronic_invoice_events
+     WHERE sale_id = ? OR related_sale_id = ?
+     ORDER BY created_at DESC`,
+    [saleId, saleId],
+  ).catch(() => [[] as any[]]);
+
   return {
     ...sale,
     items: Array.isArray(itemsRows) ? itemsRows : [],
+    electronic_events: Array.isArray(eventsRows) ? eventsRows : [],
   };
 }
-
-/* =========================
-   DEVOLUCIÓN DE VENTA
-========================= */
 
 export async function returnSaleMySql(data: any): Promise<{ totalReturned: number }> {
   const pool = getMySqlPool();
@@ -402,7 +652,6 @@ export async function returnSaleMySql(data: any): Promise<{ totalReturned: numbe
     let totalReturned = 0;
 
     for (const item of data.items ?? []) {
-
       const [rows] = await conn.query<any[]>(
         `SELECT product_id, qty, unit_price
          FROM sale_items
@@ -461,16 +710,10 @@ export async function returnSaleMySql(data: any): Promise<{ totalReturned: numbe
     await conn.commit();
 
     return { totalReturned };
-
   } catch (e) {
-
     try { await conn.rollback(); } catch {}
-
     throw e;
-
   } finally {
-
     conn.release();
-
   }
 }
