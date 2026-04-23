@@ -19,7 +19,7 @@ export const getSuspendedSale = (id: string) =>
 export const deleteSuspendedSale = (id: string) =>
   ipc.sales.deleteSuspended({ ...getAuthContext(), id });
 
-export const listRecentSales = (limit = 30) =>
+export const listRecentSales = (limit = 1000) =>
   ipc.sales.listRecent({ ...getAuthContext(), limit });
 
 export const getSaleDetail = (id: string) =>

@@ -578,9 +578,9 @@ export async function deleteSuspendedSaleMySql(id: string): Promise<void> {
   }
 }
 
-export async function listRecentSalesMySql(limit = 30): Promise<any[]> {
+export async function listRecentSalesMySql(limit = 1000): Promise<any[]> {
   const pool = getMySqlPool();
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 30, 500));
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 1000, 1000));
 
   const [rows] = await pool.execute<any[]>(
     `SELECT
@@ -617,12 +617,22 @@ export async function getSaleDetailMySql(saleId: string): Promise<any | null> {
   if (!sale) return null;
 
   const [itemsRows] = await pool.query<any[]>(
-    `SELECT *
-     FROM sale_items
-     WHERE sale_id = ?
-     ORDER BY id ASC`,
-    [saleId],
-  );
+  `SELECT
+      si.*,
+      COALESCE(
+        NULLIF(TRIM(si.description), ''),
+        NULLIF(TRIM(p.name), ''),
+        NULLIF(TRIM(CONCAT(COALESCE(p.brand, ''), ' ', COALESCE(p.model, ''))), ''),
+        NULLIF(TRIM(p.sku), ''),
+        NULLIF(TRIM(p.barcode), ''),
+        'Producto'
+      ) AS item_name
+   FROM sale_items si
+   LEFT JOIN products p ON p.id = si.product_id
+   WHERE si.sale_id = ?
+   ORDER BY si.id ASC`,
+  [saleId],
+);
 
   const [eventsRows] = await pool.query<any[]>(
     `SELECT *

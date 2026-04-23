@@ -386,7 +386,7 @@ export const POS = ({ user }: { user: any }) => {
 
   const loadRecent = async () => {
     try {
-      const rows = await listRecentSales(30);
+      const rows = await listRecentSales(1000);
       setRecentRows(Array.isArray(rows) ? rows : []);
     } catch (e: any) {
       setMessage(e?.message || 'No se pudieron cargar las ventas recientes.');
@@ -528,12 +528,16 @@ export const POS = ({ user }: { user: any }) => {
       businessNit: biz?.nit ?? '',
       businessPhone: biz?.phone ?? '',
       items: (saleDetail?.items ?? []).map((item: any) => ({
-        name: item?.name ?? item?.description ?? 'Producto',
-        description: item?.description ?? '',
-        qty: Number(item?.qty ?? 0),
-        unit_price: Number(item?.unit_price ?? 0),
-        line_total: Number(item?.line_total ?? 0),
-      })),
+        name:
+          String(item?.item_name ?? '').trim() ||
+          String(item?.name ?? '').trim() ||
+          String(item?.description ?? '').trim() ||
+          'Producto',
+          description: String(item?.description ?? '').trim(),
+          qty: Number(item?.qty ?? 0),
+          unit_price: Number(item?.unit_price ?? 0),
+          line_total: Number(item?.line_total ?? 0),
+        })),
     });
 
     setPendingInvoice({
@@ -1428,7 +1432,7 @@ export const POS = ({ user }: { user: any }) => {
             <div style={{ display: 'grid', gap: 8 }}>
               {(saleDetail.items ?? []).map((item: any) => (
                 <div key={item.id} className="subcard">
-                  <div style={{ fontWeight: 700 }}>{item.name || item.description || 'Producto'}</div>
+                  <div style={{ fontWeight: 700 }}>{item.item_name || item.name || item.description || 'Producto'}</div>
                   <div className="soft-text">
                     {item.qty} × {money(Number(item.unit_price ?? 0))} = {money(Number(item.line_total ?? 0))}
                   </div>

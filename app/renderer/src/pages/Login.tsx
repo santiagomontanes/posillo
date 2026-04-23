@@ -18,7 +18,7 @@ export const Login = ({ onLogin }: { onLogin: (u: any) => void }) => {
   const [showCard, setShowCard] = useState(false);
 
   const whatsappNumber = "573043547758";
-  const version = "v1.0.0";
+  const version = "v1.2.1";
 
   useEffect(() => {
     const t = setTimeout(() => setShowCard(true), 120);

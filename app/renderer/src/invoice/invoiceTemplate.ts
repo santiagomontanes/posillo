@@ -56,8 +56,9 @@ export const buildInvoiceHtml = (data: InvoiceData): string => {
 
   const itemLines = items
     .map((it) => {
-      const name = safe(it.name);
-      const desc = it.description ? safe(it.description) : '';
+      const resolvedName = String(it.name ?? '').trim() || String(it.description ?? '').trim() || 'Producto';
+      const name = safe(resolvedName);
+      const desc = String(it.description ?? '').trim() ? safe(it.description) : '';
       const qty = Number(it.qty ?? 0);
       const unit = money(it.unit_price);
       const total = money(it.line_total);

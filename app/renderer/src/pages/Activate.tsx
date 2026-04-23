@@ -12,7 +12,7 @@ export const Activate = () => {
   const api = (window as any).api;
 
   const whatsappNumber = "573043547758";
-  const version = "v1.0.0";
+  const version = "v1.2.1";
 
   useEffect(() => {
     const t = setTimeout(() => setShowCard(true), 120);
