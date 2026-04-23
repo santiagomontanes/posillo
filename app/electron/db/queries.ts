@@ -351,8 +351,8 @@ export const createSale = (input: any): { saleId: string; invoiceNumber: string 
 
   const tx = db.transaction(() => {
     db.prepare(
-      `INSERT INTO sales (id,invoice_number,date,user_id,payment_method,subtotal,discount,total,customer_name,customer_id,created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO sales (id,invoice_number,date,user_id,payment_method,subtotal,discount,total,table_name,customer_name,customer_id,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       saleId,
       invoiceNumber,
@@ -362,6 +362,7 @@ export const createSale = (input: any): { saleId: string; invoiceNumber: string 
       input.subtotal,
       input.discount,
       input.total,
+      input.tableName ?? null,
       input.customerName ?? '',
       input.customerId ?? '',
       now,
@@ -824,7 +825,7 @@ export const deleteSuspendedSale = (id: string): void => {
 export const listRecentSales = (limit = 20): unknown[] =>
   getDb()
     .prepare(`
-      SELECT id,invoice_number,date,total,payment_method,customer_name
+      SELECT id,invoice_number,date,total,payment_method,table_name,customer_name
       FROM sales
       ORDER BY date DESC
       LIMIT ?

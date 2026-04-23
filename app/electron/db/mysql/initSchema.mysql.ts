@@ -187,6 +187,7 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
       subtotal INT NOT NULL,
       discount INT NOT NULL,
       total INT NOT NULL,
+      table_name VARCHAR(50) NULL,
       customer_name VARCHAR(255) NULL,
       customer_id VARCHAR(120) NULL,
       created_at DATETIME NOT NULL,
@@ -317,6 +318,36 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
       unit_cost DOUBLE NOT NULL DEFAULT 0,
       INDEX idx_suspended_sale_items_sale (suspended_sale_id),
       INDEX idx_suspended_sale_items_product (product_id)
+    );
+  `);
+
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS table_orders (
+      id VARCHAR(36) PRIMARY KEY,
+      table_name VARCHAR(120) NOT NULL,
+      total INT NOT NULL DEFAULT 0,
+      status VARCHAR(20) NOT NULL DEFAULT 'open',
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME NOT NULL,
+      INDEX idx_table_orders_status (status),
+      INDEX idx_table_orders_created_at (created_at)
+    );
+  `);
+
+  await mysqlExec(`
+    CREATE TABLE IF NOT EXISTS table_order_items (
+      id VARCHAR(36) PRIMARY KEY,
+      table_order_id VARCHAR(36) NOT NULL,
+      product_id VARCHAR(36) NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      qty INT NOT NULL,
+      unit_price INT NOT NULL,
+      line_total INT NOT NULL,
+      stock INT NULL,
+      unit_cost DOUBLE NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL,
+      INDEX idx_table_order_items_table (table_order_id)
     );
   `);
 
@@ -455,6 +486,7 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
   await addColumnIfMissing('products', 'status', "`status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' AFTER `active`");
   await addColumnIfMissing('products', 'location', '`location` VARCHAR(120) NULL AFTER `notes`');
 
+  await addColumnIfMissing('sales', 'table_name', '`table_name` VARCHAR(50) NULL AFTER `total`');
   await addColumnIfMissing('sales', 'customer_email', '`customer_email` VARCHAR(255) NULL AFTER `customer_id`');
   await addColumnIfMissing('sales', 'customer_phone', '`customer_phone` VARCHAR(60) NULL AFTER `customer_email`');
   await addColumnIfMissing('sales', 'customer_address', '`customer_address` VARCHAR(255) NULL AFTER `customer_phone`');
@@ -491,6 +523,9 @@ export async function initMySqlSchema(): Promise<{ ok: true }> {
   await ensureDateTimeColumn('sale_returns', 'created_at');
   await ensureDateTimeColumn('suspended_sales', 'created_at');
   await ensureDateTimeColumn('suspended_sales', 'updated_at');
+  await ensureDateTimeColumn('table_orders', 'created_at');
+  await ensureDateTimeColumn('table_orders', 'updated_at');
+  await ensureDateTimeColumn('table_order_items', 'created_at');
   await ensureDateTimeColumn('electronic_billing_settings', 'created_at');
   await ensureDateTimeColumn('electronic_billing_settings', 'updated_at');
   await ensureDateTimeColumn('electronic_invoice_events', 'created_at');

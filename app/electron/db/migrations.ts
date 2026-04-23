@@ -62,6 +62,7 @@ export const runMigrations = (db: Database.Database): void => {
       subtotal INTEGER NOT NULL,
       discount INTEGER NOT NULL,
       total INTEGER NOT NULL,
+      table_name TEXT,
       customer_name TEXT,
       customer_id TEXT,
       created_at TEXT NOT NULL,
@@ -151,6 +152,31 @@ export const runMigrations = (db: Database.Database): void => {
       FOREIGN KEY (product_id) REFERENCES products(id)
     );
 
+    CREATE TABLE IF NOT EXISTS table_orders (
+      id TEXT PRIMARY KEY,
+      table_name TEXT NOT NULL,
+      total INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS table_order_items (
+      id TEXT PRIMARY KEY,
+      table_order_id TEXT NOT NULL,
+      product_id TEXT,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      qty INTEGER NOT NULL,
+      unit_price INTEGER NOT NULL,
+      line_total INTEGER NOT NULL,
+      stock INTEGER,
+      unit_cost REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (table_order_id) REFERENCES table_orders(id),
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+
     /* =========================
        NUEVO: DEVOLUCIONES
     ========================= */
@@ -224,6 +250,9 @@ export const runMigrations = (db: Database.Database): void => {
 
     CREATE INDEX IF NOT EXISTS idx_suspended_sales_created_at ON suspended_sales(created_at);
     CREATE INDEX IF NOT EXISTS idx_suspended_sale_items_sale ON suspended_sale_items(suspended_sale_id);
+    CREATE INDEX IF NOT EXISTS idx_table_orders_status ON table_orders(status);
+    CREATE INDEX IF NOT EXISTS idx_table_orders_created_at ON table_orders(created_at);
+    CREATE INDEX IF NOT EXISTS idx_table_order_items_table ON table_order_items(table_order_id);
     CREATE INDEX IF NOT EXISTS idx_sale_returns_sale_id ON sale_returns(sale_id);
     CREATE INDEX IF NOT EXISTS idx_sale_return_items_return_id ON sale_return_items(return_id);
     CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name);
@@ -429,6 +458,11 @@ export const runMigrations = (db: Database.Database): void => {
   } else {
     if (!hasDescription) db.exec("ALTER TABLE sale_items ADD COLUMN description TEXT DEFAULT ''");
     if (!hasUnitCost) db.exec('ALTER TABLE sale_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
+  }
+
+  const salesCols = db.prepare('PRAGMA table_info(sales)').all() as Array<{ name: string }>;
+  if (!salesCols.some((c) => c.name === 'table_name')) {
+    db.exec('ALTER TABLE sales ADD COLUMN table_name TEXT');
   }
 
   const cashCols = db.prepare('PRAGMA table_info(cash_closures)').all() as Array<{ name: string }>;

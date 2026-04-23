@@ -126,6 +126,7 @@ async function ensureSalesFactusColumnsMySql(): Promise<void> {
     await pool.execute(`ALTER TABLE sales ADD COLUMN ${definition}`);
   };
 
+  await addColumnIfMissing('table_name', 'table_name VARCHAR(50) NULL');
   await addColumnIfMissing('customer_email', 'customer_email VARCHAR(255) NULL');
   await addColumnIfMissing('customer_phone', 'customer_phone VARCHAR(60) NULL');
   await addColumnIfMissing('customer_address', 'customer_address VARCHAR(255) NULL');
@@ -165,6 +166,7 @@ export async function createSaleMySql(input: any): Promise<{ saleId: string; inv
           subtotal,
           discount,
           total,
+          table_name,
           customer_name,
           customer_id,
           customer_email,
@@ -175,7 +177,7 @@ export async function createSaleMySql(input: any): Promise<{ saleId: string; inv
           created_at
         )
        VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         saleId,
         invoiceNumber,
@@ -185,6 +187,7 @@ export async function createSaleMySql(input: any): Promise<{ saleId: string; inv
         Number(input.subtotal ?? 0),
         Number(input.discount ?? 0),
         Number(input.total ?? 0),
+        input.tableName ? String(input.tableName).trim() : null,
         input.customerName ?? null,
         input.customerId ?? null,
         input.customerEmail ?? null,
@@ -589,6 +592,7 @@ export async function listRecentSalesMySql(limit = 1000): Promise<any[]> {
         date,
         total,
         payment_method,
+        table_name,
         customer_name,
         customer_id,
         factus_status,

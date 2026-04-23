@@ -27,6 +27,7 @@ import {
 import { registerInstallerIpc } from './ipc/installer.ipc';
 import { registerAutoDetectIpc } from './ipc/autodetect.ipc';
 import { registerElectronicBillingIpc } from './ipc/electronicBilling.ipc';
+import { registerTableOrdersIpc } from './ipc/tableOrders.ipc';
 
 console.log('[MAIN] Electron arrancó desde:', __filename);
 
@@ -209,6 +210,7 @@ app.whenReady().then(async () => {
   registerAuditIpc();
   registerConfigIpc();
   registerElectronicBillingIpc();
+  registerTableOrdersIpc();
 
   setupAutoUpdates();
 

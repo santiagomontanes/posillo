@@ -59,6 +59,28 @@ export const ipc = {
     },
   },
 
+  tableOrders: {
+    list: async (payload: unknown) => {
+      return await api.tableOrders.list(payload);
+    },
+
+    create: async (payload: unknown) => {
+      return await api.tableOrders.create(payload);
+    },
+
+    get: async (payload: unknown) => {
+      return await api.tableOrders.get(payload);
+    },
+
+    save: async (payload: unknown) => {
+      return await api.tableOrders.save(payload);
+    },
+
+    close: async (payload: unknown) => {
+      return await api.tableOrders.close(payload);
+    },
+  },
+
   cashdrawer: {
     listPorts: async (): Promise<any[]> => {
       try {

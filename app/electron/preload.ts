@@ -47,6 +47,14 @@ contextBridge.exposeInMainWorld('api', {
     set: (data: any) => ipcRenderer.invoke('electronicBilling:set', data),
   },
 
+  tableOrders: {
+    list: (payload: unknown) => ipcRenderer.invoke('tableOrders:list', payload),
+    create: (payload: unknown) => ipcRenderer.invoke('tableOrders:create', payload),
+    get: (payload: unknown) => ipcRenderer.invoke('tableOrders:get', payload),
+    save: (payload: unknown) => ipcRenderer.invoke('tableOrders:save', payload),
+    close: (payload: unknown) => ipcRenderer.invoke('tableOrders:close', payload),
+  },
+
   products: {
     list: (payload: unknown) => ipcRenderer.invoke('products:list', payload),
     listForPos: (payload: unknown) => ipcRenderer.invoke('pos:products:list', payload),

@@ -18,6 +18,13 @@ import { Modal } from '../ui/Modal';
 import { buildInvoiceHtml } from '../invoice/invoiceTemplate';
 import { getConfig } from '../services/config';
 import { ipc } from '../services/ipcClient';
+import {
+  closeTableOrder,
+  createTableOrder,
+  getTableOrder,
+  listTableOrders,
+  saveTableOrder,
+} from '../services/tableOrders';
 
 type CartItem = {
   cart_id: string;
@@ -29,6 +36,32 @@ type CartItem = {
   line_total: number;
   stock: number | null;
   unit_cost: number;
+};
+
+type TableOrderRow = {
+  id: string;
+  table_name?: string;
+  tableName?: string;
+  total?: number;
+  status?: 'open' | 'closed';
+  created_at?: string;
+  createdAt?: string;
+  item_count?: number;
+  itemCount?: number;
+};
+
+type PosDraft = {
+  cart: CartItem[];
+  discount: number;
+  paymentMethod: string;
+  cashReceivedStr: string;
+  customerName: string;
+  customerId: string;
+  customerEmail: string;
+  customerPhone: string;
+  customerAddress: string;
+  showCustomer: boolean;
+  generateElectronicInvoice: boolean;
 };
 
 const money = (n: number): string => {
@@ -124,6 +157,16 @@ export const POS = ({ user }: { user: any }) => {
 
   const [askPrint, setAskPrint] = useState(false);
   const [pendingInvoice, setPendingInvoice] = useState<any>(null);
+  const [tablesOpen, setTablesOpen] = useState(false);
+  const [tables, setTables] = useState<TableOrderRow[]>([]);
+  const [activeTableId, setActiveTableId] = useState<string | null>(null);
+  const [activeTableName, setActiveTableName] = useState('');
+  const [newTableName, setNewTableName] = useState('');
+  const regularDraftRef = useRef<PosDraft | null>(null);
+  const tableHydratingRef = useRef(false);
+  const tableSaveTimerRef = useRef<number | null>(null);
+  const tableSaveQueueRef = useRef(Promise.resolve());
+  const pendingTableCheckoutRef = useRef<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     focusScanner();
@@ -142,6 +185,19 @@ export const POS = ({ user }: { user: any }) => {
         setBiz({});
       }
     })();
+  }, []);
+
+  const refreshTables = async () => {
+    try {
+      const rows = await listTableOrders();
+      setTables(Array.isArray(rows) ? rows : []);
+    } catch {
+      setTables([]);
+    }
+  };
+
+  useEffect(() => {
+    void refreshTables();
   }, []);
 
   useEffect(() => {
@@ -207,6 +263,83 @@ export const POS = ({ user }: { user: any }) => {
     if (text.includes('disco') || text.includes('ssd') || text.includes('hdd')) return 'ri-hard-drive-3-line';
     if (text.includes('memoria') || text.includes('ram')) return 'ri-save-3-line';
     return 'ri-box-3-line';
+  };
+
+  const buildCurrentDraft = (): PosDraft => ({
+    cart,
+    discount,
+    paymentMethod,
+    cashReceivedStr,
+    customerName,
+    customerId,
+    customerEmail,
+    customerPhone,
+    customerAddress,
+    showCustomer,
+    generateElectronicInvoice,
+  });
+
+  const applyDraft = (draft: PosDraft | null): void => {
+    if (!draft) {
+      setCart([]);
+      setDiscount(0);
+      setPayment('EFECTIVO');
+      setCashReceivedStr('');
+      setCustomerName('');
+      setCustomerId('');
+      setCustomerEmail('');
+      setCustomerPhone('');
+      setCustomerAddress('');
+      setShowCustomer(false);
+      setGenerateElectronicInvoice(false);
+      return;
+    }
+
+    setCart(draft.cart);
+    setDiscount(draft.discount);
+    setPayment(draft.paymentMethod);
+    setCashReceivedStr(draft.cashReceivedStr);
+    setCustomerName(draft.customerName);
+    setCustomerId(draft.customerId);
+    setCustomerEmail(draft.customerEmail);
+    setCustomerPhone(draft.customerPhone);
+    setCustomerAddress(draft.customerAddress);
+    setShowCustomer(draft.showCustomer);
+    setGenerateElectronicInvoice(draft.generateElectronicInvoice);
+  };
+
+  const resetCheckoutFields = (): void => {
+    setDiscount(0);
+    setPayment('EFECTIVO');
+    setCashReceivedStr('');
+    setCustomerName('');
+    setCustomerId('');
+    setCustomerEmail('');
+    setCustomerPhone('');
+    setCustomerAddress('');
+    setShowCustomer(false);
+    setGenerateElectronicInvoice(false);
+  };
+
+  const withTableHydration = (run: () => void): void => {
+    tableHydratingRef.current = true;
+    run();
+    window.setTimeout(() => {
+      tableHydratingRef.current = false;
+    }, 0);
+  };
+
+  const getNextTableName = (): string => {
+    const nums = tables
+      .map((row) => {
+        const raw = String(row.tableName ?? row.table_name ?? '');
+        const match = raw.match(/(\d+)/);
+        return match ? Number(match[1]) : 0;
+      })
+      .filter((n) => Number.isFinite(n) && n > 0);
+
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : tables.length + 1;
+    return `Mesa ${next}`;
   };
 
   const setQty = (cartId: string, qty: number): void => {
@@ -374,6 +507,161 @@ export const POS = ({ user }: { user: any }) => {
     setCustomerPhone('');
     setCustomerAddress('');
   };
+
+  const openTableInCart = async (id: string, fallbackName?: string) => {
+    try {
+      const detail = await getTableOrder(id);
+      if (!detail) {
+        setMessage('Mesa no encontrada.');
+        await refreshTables();
+        return;
+      }
+
+      if (!activeTableId) {
+        regularDraftRef.current = buildCurrentDraft();
+      }
+
+      const items = Array.isArray(detail.items) ? detail.items : [];
+
+      withTableHydration(() => {
+        setActiveTableId(String(detail.id ?? id));
+        setActiveTableName(String(detail.tableName ?? fallbackName ?? 'Mesa'));
+        setCart(
+          items.map((item: any) => ({
+            cart_id: `${item.product_id ?? 'free'}-${item.id}-${Date.now()}`,
+            product_id: item.product_id ?? null,
+            description: item.description ?? '',
+            name: String(item.name ?? ''),
+            qty: Number(item.qty ?? 0),
+            unit_price: Number(item.unit_price ?? 0),
+            line_total: Number(item.line_total ?? 0),
+            stock: item.stock == null ? null : Number(item.stock),
+            unit_cost: Number(item.unit_cost ?? 0),
+          })),
+        );
+        resetCheckoutFields();
+      });
+
+      setTablesOpen(false);
+      setMessage('');
+      focusScanner();
+    } catch (e: any) {
+      setMessage(e?.message || 'No se pudo abrir la mesa.');
+    }
+  };
+
+  const leaveActiveTable = (): void => {
+    withTableHydration(() => {
+      setActiveTableId(null);
+      setActiveTableName('');
+      applyDraft(regularDraftRef.current);
+    });
+    focusScanner();
+  };
+
+  const handleCreateTable = async () => {
+    const tableName = String(newTableName || getNextTableName()).trim();
+    if (!tableName) {
+      setMessage('El nombre de la mesa es obligatorio.');
+      return;
+    }
+
+    try {
+      const created = await createTableOrder(tableName);
+      setNewTableName('');
+      await refreshTables();
+      if (created?.id) {
+        await openTableInCart(String(created.id), tableName);
+      }
+    } catch (e: any) {
+      setMessage(e?.message || 'No se pudo crear la mesa.');
+    }
+  };
+
+  const finalizeCompletedTableCheckout = async () => {
+    const pending = pendingTableCheckoutRef.current;
+    if (!pending?.id) return;
+    let closedOk = false;
+
+    try {
+      await closeTableOrder(pending.id);
+      await refreshTables();
+      closedOk = true;
+    } catch (e: any) {
+      setMessage(
+        e?.message
+          ? `La venta se registró, pero no se pudo cerrar ${pending.name}: ${e.message}`
+          : `La venta se registró, pero no se pudo cerrar ${pending.name}.`,
+      );
+    } finally {
+      pendingTableCheckoutRef.current = null;
+      if (closedOk && activeTableId === pending.id) {
+        leaveActiveTable();
+      } else if (!closedOk && activeTableId === pending.id) {
+        setActiveTableId(null);
+        setActiveTableName('');
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!activeTableId || tableHydratingRef.current) return;
+    if (pendingTableCheckoutRef.current?.id === activeTableId) return;
+
+    const snapshotItems = cart.map((item) => ({
+      product_id: item.product_id,
+      name: item.name,
+      description: item.description ?? '',
+      qty: item.qty,
+      unit_price: item.unit_price,
+      line_total: item.line_total,
+      stock: item.stock,
+      unit_cost: item.unit_cost,
+    }));
+
+    if (tableSaveTimerRef.current) {
+      window.clearTimeout(tableSaveTimerRef.current);
+    }
+
+    tableSaveTimerRef.current = window.setTimeout(() => {
+      const nextTotal = Math.max(
+        0,
+        snapshotItems.reduce((acc, item) => acc + Number(item.line_total ?? 0), 0),
+      );
+
+      tableSaveQueueRef.current = tableSaveQueueRef.current
+        .then(async () => {
+          await saveTableOrder({
+            id: activeTableId,
+            tableName: activeTableName,
+            items: snapshotItems,
+            total: nextTotal,
+          });
+
+          setTables((current) =>
+            current.map((row) =>
+              String(row.id) === String(activeTableId)
+                ? {
+                    ...row,
+                    table_name: activeTableName,
+                    tableName: activeTableName,
+                    total: nextTotal,
+                    item_count: snapshotItems.length,
+                    itemCount: snapshotItems.length,
+                  }
+                : row,
+            ),
+          );
+        })
+        .catch(() => {});
+    }, 120);
+
+    return () => {
+      if (tableSaveTimerRef.current) {
+        window.clearTimeout(tableSaveTimerRef.current);
+      }
+    };
+  }, [activeTableId, activeTableName, cart]);
 
   const loadSuspended = async () => {
     try {
@@ -752,6 +1040,7 @@ export const POS = ({ user }: { user: any }) => {
         discount,
         total,
         paymentMethod,
+        tableName: activeTableId ? activeTableName : undefined,
         ...finalCustomer,
         cashReceived: paymentMethod === 'EFECTIVO' ? cashReceived : 0,
         cashChange: paymentMethod === 'EFECTIVO' ? change : 0,
@@ -802,6 +1091,10 @@ export const POS = ({ user }: { user: any }) => {
         electronicInvoiceNumber: String(res?.factus?.data?.bill?.number ?? ''),
       });
 
+      pendingTableCheckoutRef.current = activeTableId
+        ? { id: activeTableId, name: activeTableName || 'mesa' }
+        : null;
+
       setAskPrint(true);
     } catch (e: any) {
       setMessage(e?.message || 'No se pudo confirmar la venta.');
@@ -812,6 +1105,32 @@ export const POS = ({ user }: { user: any }) => {
   };
 
   const paymentOptions = ['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'BANCOLOMBIA', 'TARJETA', 'ADDI', 'OTRO'];
+  const visualItemName = (item: CartItem): string =>
+    activeTableId ? `${activeTableName} - ${item.name}` : item.name;
+  const getSaleDetailTableName = (detail: any): string | null => {
+    const direct = String(detail?.tableName ?? detail?.table_name ?? '').trim();
+    if (direct) return direct;
+
+    const items = Array.isArray(detail?.items) ? detail.items : [];
+    if (items.length === 0) return null;
+
+    const prefixRegex = /^(Mesa\s+\d+)\s*-/i;
+    const prefixes = items
+      .map((item: any) => {
+        const raw = String(item?.item_name ?? item?.name ?? item?.description ?? '').trim();
+        const match = raw.match(prefixRegex);
+        return match ? match[1] : null;
+      })
+      .filter((value: string | null): value is string => !!value);
+
+    if (prefixes.length !== items.length) return null;
+
+    const normalized = prefixes.map((value: string) => value.toLowerCase());
+    const first = normalized[0];
+    if (!normalized.every((value: string) => value === first)) return null;
+
+    return prefixes[0];
+  };
 
   return (
     <div className="dashboard" onClick={onRootClick}>
@@ -882,6 +1201,11 @@ export const POS = ({ user }: { user: any }) => {
               <i className="ri-add-circle-line" />
               Ítem libre
             </button>
+
+            <button className="btn btn--ghost" onClick={() => setTablesOpen(true)}>
+              <i className="ri-restaurant-line" />
+              Mesas
+            </button>
           </div>
 
           <div className="pos__products">
@@ -920,9 +1244,24 @@ export const POS = ({ user }: { user: any }) => {
 
         <section className="pos__right card">
           <div className="pos__right-header">
-            <h3 className="section-title" style={{ margin: 0 }}>Carrito</h3>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <h3 className="section-title" style={{ margin: 0 }}>Carrito</h3>
+              {activeTableId ? (
+                <div className="badge-soft">
+                  <i className="ri-restaurant-line" />
+                  {activeTableName}
+                </div>
+              ) : null}
+            </div>
 
             <div className="actions-row">
+              {activeTableId ? (
+                <button className="btn btn--ghost" onClick={leaveActiveTable} disabled={isProcessing}>
+                  <i className="ri-arrow-go-back-line" />
+                  Salir de mesa
+                </button>
+              ) : null}
+
               <button className="btn btn--ghost" onClick={clearCart} disabled={isProcessing}>
                 <i className="ri-delete-bin-6-line" />
                 Vaciar
@@ -1021,7 +1360,7 @@ export const POS = ({ user }: { user: any }) => {
               return (
                 <div key={i.cart_id} className="pos__cart-row">
                   <div className="pos__cart-info">
-                    <div className="pos__cart-name">{i.name}</div>
+                    <div className="pos__cart-name">{visualItemName(i)}</div>
 
                     <div className="pos__cart-meta">
                       <span>{money(i.unit_price)} c/u</span>
@@ -1187,7 +1526,7 @@ export const POS = ({ user }: { user: any }) => {
               disabled={!canConfirm}
             >
               <i className="ri-bank-card-line" />
-              {isProcessing ? 'Procesando...' : 'COBRAR'}
+              {isProcessing ? 'Procesando...' : activeTableId ? 'COBRAR MESA' : 'COBRAR'}
             </button>
 
             <div className="actions-row" style={{ marginTop: 10 }}>
@@ -1413,6 +1752,11 @@ export const POS = ({ user }: { user: any }) => {
           <div className="soft-text">No hay detalle disponible.</div>
         ) : (
           <div style={{ display: 'grid', gap: 12 }}>
+            {getSaleDetailTableName(saleDetail) ? (
+              <div>
+                <b>Mesa:</b> {getSaleDetailTableName(saleDetail)}
+              </div>
+            ) : null}
             <div>
               <b>Factura:</b> #{saleDetail.invoice_number || saleDetail.invoiceNumber}
             </div>
@@ -1632,6 +1976,63 @@ export const POS = ({ user }: { user: any }) => {
         </div>
       </Modal>
 
+      <Modal open={tablesOpen} onClose={() => setTablesOpen(false)}>
+        <h3>Mesas</h3>
+
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div className="subcard" style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontWeight: 800 }}>Crear mesa temporal</div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10 }}>
+              <input
+                value={newTableName}
+                onChange={(e) => setNewTableName(e.target.value)}
+                placeholder={getNextTableName()}
+              />
+              <button className="btn" onClick={() => void handleCreateTable()}>
+                Crear mesa
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gap: 10 }}>
+            {tables.length === 0 ? (
+              <div className="soft-text">No hay mesas abiertas.</div>
+            ) : (
+              tables.map((table) => {
+                const rowId = String(table.id);
+                const rowName = String(table.tableName ?? table.table_name ?? 'Mesa');
+                const rowTotal = Number(table.total ?? 0);
+                const rowItems = Number(table.itemCount ?? table.item_count ?? 0);
+                const isActive = activeTableId === rowId;
+
+                return (
+                  <div
+                    key={rowId}
+                    className="subcard"
+                    style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}
+                  >
+                    <div style={{ display: 'grid', gap: 4 }}>
+                      <div style={{ fontWeight: 800 }}>{rowName}</div>
+                      <div className="soft-text">
+                        {rowItems} ítems · {money(rowTotal)}
+                      </div>
+                    </div>
+
+                    <button
+                      className={`btn ${isActive ? 'btn--ghost' : ''}`}
+                      onClick={() => void openTableInCart(rowId, rowName)}
+                    >
+                      {isActive ? 'Mesa activa' : 'Abrir mesa'}
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </Modal>
+
       <Modal open={askPrint} onClose={() => setAskPrint(false)}>
         <h3>¿Imprimir factura?</h3>
 
@@ -1647,6 +2048,7 @@ export const POS = ({ user }: { user: any }) => {
 
               clearCart();
               clearCustomerData();
+              await finalizeCompletedTableCheckout();
               setAskPrint(false);
               setPendingInvoice(null);
 
@@ -1661,6 +2063,7 @@ export const POS = ({ user }: { user: any }) => {
             onClick={async () => {
               clearCart();
               clearCustomerData();
+              await finalizeCompletedTableCheckout();
               setAskPrint(false);
               setPendingInvoice(null);
 
